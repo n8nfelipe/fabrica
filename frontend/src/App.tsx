@@ -905,7 +905,7 @@ function App() {
                   <button className="button button--quiet task-preview-open" type="button" onClick={() => void openTask(previewTask)} disabled={busy}>Abrir detalhes completos</button>
                 </> : <div className="task-preview-empty"><span aria-hidden="true">☷</span><strong>Selecione uma tarefa</strong><p>Os detalhes da tarefa aparecerão aqui.</p></div>}
               </aside>
-            </div> : <div className="task-board" role="region" aria-label="Colunas do quadro de tarefas" tabIndex={0}>
+            </div> : <div className="task-board" role="region" aria-label="Colunas do quadro de tarefas">
             {taskColumns.map((column) => {
               const columnTasks = visibleTasks.filter((task) => column.states.includes(task.state))
               return <section className="task-column" key={column.title} aria-label={`${column.title}: ${columnTasks.length} tarefas`}>
