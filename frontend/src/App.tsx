@@ -148,7 +148,11 @@ function nextTaskAction(task: Task, role?: Role) {
 }
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const url = new URL(path, window.location.origin)
+  if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) {
+    throw new Error('URL de API inválida.')
+  }
+  const response = await fetch(url, {
     ...options,
     credentials: 'same-origin',
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },

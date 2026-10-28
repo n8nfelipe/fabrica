@@ -1349,11 +1349,11 @@ func (h *Handler) persistImplementationResult(ctx context.Context, task Task, ru
 	if status != "succeeded" {
 		return
 	}
-	startCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	startCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	_, environmentErr := h.startQAEnvironmentForTask(startCtx, task.ID, "start")
 	cancel()
 	if environmentErr != nil {
-		eventCtx, eventCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		eventCtx, eventCancel := context.WithTimeout(ctx, 5*time.Second)
 		_ = h.recordSystemTaskEvent(eventCtx, task.ID, task.CreatedBy, "failure", "qa_environment_start_failed", string(workflow.StateWaitingQA), string(workflow.StateWaitingQA), opencode.Redact(environmentErr.Error()))
 		eventCancel()
 	}
