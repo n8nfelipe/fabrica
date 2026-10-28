@@ -65,6 +65,72 @@ func TestQADecisionRequiresCommentAndEvidence(t *testing.T) {
 	}
 }
 
+func TestStartCorrectionStartsImplementationWithDeveloperPermission(t *testing.T) {
+	task := Task{State: StateCorrectionNeeded, SpecificationStatus: StatusApproved, QAStatus: StatusRejected, ImplementationStatus: StatusSucceeded}
+	updated, err := Apply(task, ActionStartCorrection, "Desenvolvedor", "", "")
+	if err != nil {
+		t.Fatalf("start correction failed: %v", err)
+	}
+	if updated.State != StateInDevelopment || updated.ImplementationStatus != StatusRunning || updated.QAStatus != StatusNotStarted {
+		t.Fatalf("correction state = %#v, want development with running implementation and pending QA", updated)
+	}
+	if _, err := Apply(task, ActionStartCorrection, "QA", "", ""); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("QA starting a correction error = %v, want ErrForbidden", err)
+	}
+	if _, err := Apply(Task{State: StateInQA, SpecificationStatus: StatusApproved, QAStatus: StatusPending}, ActionStartCorrection, "Desenvolvedor", "", ""); !errors.Is(err, ErrTransition) {
+		t.Fatalf("starting correction outside correction state error = %v, want ErrTransition", err)
+	}
+}
+
+func TestQACorrectionMustReturnForNewApprovalBeforePR(t *testing.T) {
+	task := Task{State: StateInQA, SpecificationStatus: StatusApproved, ImplementationStatus: StatusSucceeded, QAStatus: StatusPending}
+	var err error
+	task, err = Apply(task, ActionRejectQA, "QA", "Corrigir o fluxo de login", "Falha reproduzida no passo 2")
+	if err != nil {
+		t.Fatalf("reject QA: %v", err)
+	}
+	task, err = Apply(task, ActionStartCorrection, "Desenvolvedor", "", "")
+	if err != nil {
+		t.Fatalf("start correction: %v", err)
+	}
+	task, err = Apply(task, ActionImplementationDone, "system", "", "login.go")
+	if err != nil || task.State != StateWaitingQA || task.QAStatus != StatusPending {
+		t.Fatalf("successful correction = %#v, %v; want QA pending", task, err)
+	}
+	if _, err := Apply(task, ActionCreatePR, "system", "", "https://github.com/acme/app/pull/1"); !errors.Is(err, ErrTransition) {
+		t.Fatalf("PR before new QA approval error = %v, want ErrTransition", err)
+	}
+	task, err = Apply(task, ActionStartQA, "QA", "", "")
+	if err != nil {
+		t.Fatalf("restart QA: %v", err)
+	}
+	task, err = Apply(task, ActionApproveQA, "QA", "Correção validada", "http://127.0.0.1:41000")
+	if err != nil || task.State != StateWaitingPR {
+		t.Fatalf("approve corrected work = %#v, %v; want PR waiting", task, err)
+	}
+}
+
+func TestFailedQACorrectionCanBeRetried(t *testing.T) {
+	task := Task{State: StateInQA, SpecificationStatus: StatusApproved, ImplementationStatus: StatusSucceeded, QAStatus: StatusPending}
+	var err error
+	task, err = Apply(task, ActionRejectQA, "QA", "Corrigir o fluxo de login", "Falha reproduzida no passo 2")
+	if err != nil {
+		t.Fatalf("reject QA: %v", err)
+	}
+	task, err = Apply(task, ActionStartCorrection, "Desenvolvedor", "", "")
+	if err != nil {
+		t.Fatalf("start correction: %v", err)
+	}
+	task, err = Apply(task, ActionImplementationError, "system", "agent failed", "")
+	if err != nil || task.State != StateInDevelopment || task.ImplementationStatus != StatusFailed {
+		t.Fatalf("failed correction = %#v, %v; want failed in development", task, err)
+	}
+	task, err = Apply(task, ActionStartImplementation, "Desenvolvedor", "", "")
+	if err != nil || task.ImplementationStatus != StatusRunning {
+		t.Fatalf("retry correction = %#v, %v; want running implementation", task, err)
+	}
+}
+
 func TestSpecificationFailureCanRetryButCannotImplement(t *testing.T) {
 	task, err := Apply(Task{State: StateOpen}, ActionMarkReady, "PO", "", "")
 	if err != nil {
