@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -99,14 +100,105 @@ func (m ComposeManager) Restart(ctx context.Context, projectID int64, workspace 
 }
 
 func (m ComposeManager) Logs(ctx context.Context, projectID int64, workspace string, tail int) (string, error) {
+	if projectID <= 0 {
+		return "", errors.New("project ID must be positive")
+	}
 	if tail < 1 || tail > 1000 {
 		return "", errors.New("log tail must be between 1 and 1000")
 	}
-	args, descriptor, _, _, err := m.prepare(ctx, projectID, workspace, 0)
+	args, _, _, _, err := m.prepare(ctx, projectID, workspace, 0)
+	if err != nil {
+		return m.logsByProjectLabel(ctx, projectID, workspace, tail, err)
+	}
+	logs, err := m.run(ctx, workspace, append(args, "logs", "--no-color", "--tail", strconv.Itoa(tail))...)
 	if err != nil {
 		return "", err
 	}
-	return m.run(ctx, workspace, append(args, "logs", "--no-color", "--tail", strconv.Itoa(tail), descriptor.QAService)...)
+	if strings.TrimSpace(logs) == "" {
+		return "No container logs are available yet. The services may have failed before creating containers.", nil
+	}
+	return logs, nil
+}
+
+// logsByProjectLabel can still collect diagnostics when the project descriptor
+// is missing or invalid. It uses Docker's Compose project label, never a
+// descriptor supplied path, to limit the lookup to this project's containers.
+func (m ComposeManager) logsByProjectLabel(ctx context.Context, projectID int64, workspace string, tail int, setupErr error) (string, error) {
+	root, err := canonicalDirectory(workspace)
+	if err != nil {
+		return "", fmt.Errorf("Compose setup failed (%v); resolve workspace for container logs: %w", setupErr, err)
+	}
+	projectName := "fabrica-" + strconv.FormatInt(projectID, 10)
+	idsOutput, err := m.runDocker(ctx, root, "ps", "--all", "--filter", "label=com.docker.compose.project="+projectName, "--format", "{{.ID}}")
+	if err != nil {
+		return "", fmt.Errorf("Compose setup failed (%v); list project containers: %w", setupErr, err)
+	}
+	ids := strings.Fields(idsOutput)
+	if len(ids) == 0 {
+		return fmt.Sprintf("No container logs are available. Compose setup failed before project containers were available: %v", setupErr), nil
+	}
+	var logs strings.Builder
+	for _, id := range ids {
+		if !containerIDPattern.MatchString(id) {
+			continue
+		}
+		output, logErr := m.runDocker(ctx, root, "logs", "--tail", strconv.Itoa(tail), id)
+		if logs.Len() > 0 {
+			logs.WriteByte('\n')
+		}
+		logs.WriteString("Container ")
+		logs.WriteString(id)
+		logs.WriteString(":\n")
+		if logErr != nil {
+			logs.WriteString("Could not read container logs: ")
+			logs.WriteString(logErr.Error())
+		} else if strings.TrimSpace(output) == "" {
+			logs.WriteString("No output available.")
+		} else {
+			logs.WriteString(output)
+		}
+	}
+	if logs.Len() == 0 {
+		return fmt.Sprintf("No container logs are available. Compose setup failed: %v", setupErr), nil
+	}
+	return logs.String(), nil
+}
+
+var containerIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
+
+func (m ComposeManager) runDocker(parent context.Context, directory string, args ...string) (string, error) {
+	timeout := m.Timeout
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	binary := m.DockerPath
+	if binary == "" {
+		binary = "docker"
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir = directory
+	var stdout, stderr limitedOutput
+	stdout.limit, stderr.limit = composeOutputLimit, 64<<10
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return stdout.String(), ctx.Err()
+		}
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		if len(message) > 1000 {
+			message = message[:1000]
+		}
+		return stdout.String(), fmt.Errorf("docker %s failed: %s", args[0], message)
+	}
+	if stdout.truncated || stderr.truncated {
+		return stdout.String(), errors.New("Docker output exceeded the capture limit")
+	}
+	return stdout.String(), nil
 }
 
 func (m ComposeManager) prepare(ctx context.Context, projectID int64, workspace string, hostPort int) ([]string, Descriptor, string, string, error) {

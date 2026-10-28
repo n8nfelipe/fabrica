@@ -23,7 +23,7 @@ func composeFixture(t *testing.T, services string) (string, string, string) {
 	}
 	logPath := filepath.Join(root, "compose-commands.log")
 	fakeDocker := filepath.Join(root, "fake-docker")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COMPOSE_TEST_LOG\"\ncase \"$*\" in\n  *'config --services'*) printf '%s\\n' '" + services + "' ;;\n  *'ps --format json'*) printf '%s\\n' '{\"ID\":\"id\",\"Name\":\"web-1\",\"Project\":\"fabrica-42\",\"Service\":\"web\",\"State\":\"running\",\"Health\":\"healthy\",\"ExitCode\":0}' ;;\nesac\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$COMPOSE_TEST_LOG\"\ncase \"$*\" in\n  *'config --services'*) printf '%s\\n' '" + services + "' ;;\n  *'logs --no-color --tail 200'*) printf '%s\\n' 'web started' 'database started' ;;\n  *'ps --format json'*) printf '%s\\n' '{\"ID\":\"id\",\"Name\":\"web-1\",\"Project\":\"fabrica-42\",\"Service\":\"web\",\"State\":\"running\",\"Health\":\"healthy\",\"ExitCode\":0}' ;;\nesac\n"
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,39 @@ func TestComposeManagerRejectsMissingQAServiceBeforeStarting(t *testing.T) {
 	_, err := (ComposeManager{DockerPath: binary}).Start(context.Background(), 42, root)
 	if err == nil || !strings.Contains(err.Error(), "QA service") {
 		t.Fatalf("expected missing QA service error, got %v", err)
+	}
+}
+
+func TestComposeManagerLogsAllServicesForQASetupFailures(t *testing.T) {
+	root, binary, logPath := composeFixture(t, "web db")
+	logs, err := (ComposeManager{DockerPath: binary}).Logs(context.Background(), 42, root, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs, "web started") || !strings.Contains(logs, "database started") {
+		t.Fatalf("Compose logs did not include all services: %q", logs)
+	}
+	commands, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(commands), "logs --no-color --tail 200\n") {
+		t.Fatalf("logs command unexpectedly targets only one service: %s", commands)
+	}
+}
+
+func TestComposeManagerExplainsWhenNoContainerLogsAreAvailable(t *testing.T) {
+	root, binary, _ := composeFixture(t, "web db")
+	script := "#!/bin/sh\ncase \"$*\" in\n  *'config --services'*) printf '%s\\n' 'web db' ;;\n  *'logs --no-color --tail 200'*) exit 0 ;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := (ComposeManager{DockerPath: binary}).Logs(context.Background(), 42, root, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs, "failed before creating containers") {
+		t.Fatalf("empty log response is not actionable: %q", logs)
 	}
 }
 

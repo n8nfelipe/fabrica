@@ -77,6 +77,8 @@ Cada projeto gerado deve incluir `.fabrica/project.json` na raiz do workspace. O
 
 `composeFile` deve ser um caminho relativo a partir da raiz do projeto e resolver para um arquivo regular dentro do mesmo workspace. Caminhos absolutos, traversal (`..`) e links simbólicos que saiam do workspace são rejeitados. `qaService` precisa corresponder a um serviço do Compose, `containerPort` deve estar entre 1 e 65535, e o health check deve ser um caminho local como `/healthz`.
 
+Em stacks com banco de dados, a aplicação deve conectar ao nome do serviço Compose e à porta interna do banco. Não publique a porta padrão do banco no host por padrão; assim, subir o projeto manualmente com `docker compose up` não colide com outro PostgreSQL local. Se os requisitos exigirem acesso ao banco pelo host, use uma porta configurável e vincule-a somente a `127.0.0.1`.
+
 O executor valida o arquivo com `docker compose config --quiet` e usa o ID do projeto como nome Compose (`fabrica-<id>`). Assim, `up`, inspeção, `stop` e `restart` atuam somente sobre os containers daquele projeto; volumes nomeados descritos pela stack permanecem associados ao mesmo projeto.
 
 A fábrica aloca portas do pool local `41000–41999`, registra a lease no PostgreSQL e publica a porta do serviço QA somente em `127.0.0.1`. A publicação vem de um override gerenciado em `.fabrica/runtime-compose.yaml`; o Compose do projeto deve declarar a porta interna do serviço e não fixar uma porta de host.

@@ -165,7 +165,7 @@ func Apply(task Task, action Action, role, comment, evidence string) (Task, erro
 			return task, ErrTransition
 		}
 		task.State = StateInDevelopment
-		task.ImplementationStatus = StatusNotStarted
+		task.ImplementationStatus = StatusRunning
 		task.QAStatus = StatusNotStarted
 	case ActionCreatePR:
 		if task.State != StateWaitingPR || task.QAStatus != StatusApproved || evidence == "" {

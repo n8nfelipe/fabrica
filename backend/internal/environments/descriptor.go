@@ -37,8 +37,14 @@ func LoadDescriptor(workspaceRoot string) (Descriptor, string, error) {
 		return descriptor, "", fmt.Errorf("resolve workspace root: %w", err)
 	}
 	path, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(DescriptorPath)))
-	if err != nil || !pathWithin(root, path) {
-		return descriptor, "", errors.New("project descriptor must resolve inside the workspace")
+	if errors.Is(err, os.ErrNotExist) {
+		return descriptor, "", errors.New("project descriptor is missing from the workspace")
+	}
+	if err != nil {
+		return descriptor, "", fmt.Errorf("resolve project descriptor: %w", err)
+	}
+	if !pathWithin(root, path) {
+		return descriptor, "", errors.New("project descriptor resolves outside the workspace")
 	}
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<10 {

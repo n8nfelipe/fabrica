@@ -566,7 +566,7 @@ func (h *Handler) qaEnvironmentLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	logs, err := h.compose.Logs(r.Context(), projectID, workspacePath, 200)
 	if err != nil {
-		http.Error(w, "could not collect QA logs", 502)
+		http.Error(w, "could not collect Compose service logs: "+opencode.Redact(err.Error()), 502)
 		return
 	}
 	writeJSON(w, 200, map[string]string{"logs": opencode.Redact(logs)})
@@ -978,7 +978,7 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 			fromState = current.State
 		}
 	}
-	if input.Action == workflow.ActionStartQA {
+	if input.Action == workflow.ActionStartQA || input.Action == workflow.ActionApproveQA {
 		var healthy bool
 		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_qa_environments WHERE project_id=$1 AND task_id=$2 AND status='healthy' AND url IS NOT NULL)`, current.ProjectID, id).Scan(&healthy); err != nil {
 			http.Error(w, "could not verify QA environment", http.StatusInternalServerError)
@@ -993,7 +993,7 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "could not record workflow attempt", http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, "QA environment must be healthy before review starts", http.StatusConflict)
+			http.Error(w, "QA environment must be healthy before review starts or is approved", http.StatusConflict)
 			return
 		}
 	}
@@ -1022,6 +1022,17 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown workflow action", http.StatusBadRequest)
 		return
 	}
+	if input.Action == workflow.ActionStartCorrection {
+		var hasQADecision bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=$1 AND action=$2 AND event_type='approval')`, id, string(workflow.ActionRejectQA)).Scan(&hasQADecision); err != nil {
+			http.Error(w, "could not verify QA correction feedback", http.StatusInternalServerError)
+			return
+		}
+		if !hasQADecision {
+			http.Error(w, "QA rejection feedback is required before starting a correction", http.StatusConflict)
+			return
+		}
+	}
 	if input.Action == workflow.ActionMerge {
 		if err := h.github.MergePullRequest(r.Context(), projectPath, prNumber); err != nil {
 			_ = appendTaskEvent(r.Context(), tx, id, actor.ID, "system", "failure", string(workflow.ActionMerge), current.State, current.State, "", "GitHub did not complete the pull request merge")
@@ -1032,7 +1043,7 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 	}
 	markReadyAction := input.Action == workflow.ActionMarkReady
 	startSpecification := input.Action == workflow.ActionStartSpecification
-	startImplementation := input.Action == workflow.ActionStartImplementation
+	startImplementation := input.Action == workflow.ActionStartImplementation || input.Action == workflow.ActionStartCorrection
 	approveSpecification := input.Action == workflow.ActionApproveSpecification
 	var agentRunID int64
 	readyState := updated.State
@@ -1259,12 +1270,22 @@ func (h *Handler) generateImplementation(taskID, runID int64) {
 		h.persistImplementationResult(ctx, task, runID, nil, "failed", "approved specification artifacts could not be read", opencode.Result{})
 		return
 	}
+	qaFeedback := ""
+	var qaComment, qaEvidence string
+	feedbackErr := h.db.QueryRowContext(ctx, `SELECT comment,reason FROM task_events WHERE task_id=$1 AND action=$2 AND event_type='approval' ORDER BY id DESC LIMIT 1`, taskID, string(workflow.ActionRejectQA)).Scan(&qaComment, &qaEvidence)
+	if feedbackErr != nil && !errors.Is(feedbackErr, sql.ErrNoRows) {
+		h.persistImplementationResult(ctx, task, runID, nil, "failed", "QA correction feedback could not be read", opencode.Result{})
+		return
+	}
+	if feedbackErr == nil {
+		qaFeedback = fmt.Sprintf("\n\nQA correction recommendations from the latest rejected review:\nComment: %s\nEvidence: %s\nAddress these recommendations while staying within the approved specification scope.", qaComment, qaEvidence)
+	}
 	before, err := opencode.CaptureSnapshot(projectPath)
 	if err != nil {
 		h.persistImplementationResult(ctx, task, runID, nil, "failed", "project workspace could not be inspected before implementation", opencode.Result{})
 		return
 	}
-	prompt := fmt.Sprintf("Implemente a tarefa aprovada a seguir no projeto. Siga os artefatos OpenSpec aprovados e não altere escopo fora deles. Preserve alterações pré-existentes, não modifique artefatos de especificação e não tente executar QA, criar PR ou fazer merge.\n\nTarefa: %s\nDescrição: %s\n\nArtefatos aprovados:\n%s", task.Title, task.Description, artifactContent)
+	prompt := fmt.Sprintf("Implemente a tarefa aprovada a seguir no projeto. Siga os artefatos OpenSpec aprovados e não altere escopo fora deles. Preserve alterações pré-existentes, não modifique artefatos de especificação e não tente executar QA, criar PR ou fazer merge. Para bancos em Docker Compose, conecte a aplicação ao nome do serviço e à porta interna; não publique a porta padrão do banco no host. Só publique o banco no host quando os requisitos pedirem acesso local, usando porta configurável vinculada somente a 127.0.0.1. O serviço de QA deve expor a porta interna indicada pelo descritor, sem fixar porta de host.\n\nTarefa: %s\nDescrição: %s\n\nArtefatos aprovados:\n%s%s", task.Title, task.Description, artifactContent, qaFeedback)
 	result, runErr := h.opencode.Run(ctx, opencode.Request{WorkspaceRoot: h.workspaceRoot, ProjectDir: projectPath, Prompt: prompt, OnStart: func(pid int, token string) error {
 		_, err := h.db.ExecContext(ctx, `UPDATE agent_runs SET process_pid=$2, process_start_token=$3 WHERE id=$1 AND status='running'`, runID, pid, token)
 		return err

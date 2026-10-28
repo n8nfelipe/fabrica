@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import './App.css'
 
 const roles = ['PO', 'QA', 'Admin', 'Scrum Master', 'Desenvolvedor'] as const
@@ -173,6 +173,8 @@ function App() {
   const [implementations, setImplementations] = useState<TaskImplementation[]>([])
   const [qaEnvironment, setQAEnvironment] = useState<QAEnvironment | null>(null)
   const [qaLogs, setQALogs] = useState('')
+  const [qaFailureMessage, setQAFailureMessage] = useState('')
+  const [qaLogsError, setQALogsError] = useState('')
   const [taskPullRequest, setTaskPullRequest] = useState<TaskPullRequest | null>(null)
   const [pullRequestChecks, setPullRequestChecks] = useState('')
   const [message, setMessage] = useState('')
@@ -182,9 +184,56 @@ function App() {
   const [confirmingId, setConfirmingId] = useState<number | null>(null)
   const [showProjectForm, setShowProjectForm] = useState(false)
   const [showTaskForm, setShowTaskForm] = useState(false)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [projectView, setProjectView] = useState<'backlog' | 'board'>('backlog')
+  const [previewTaskId, setPreviewTaskId] = useState<number | null>(null)
   const [editingTask, setEditingTask] = useState(false)
   const [actionComment, setActionComment] = useState('')
   const [qaEvidence, setQAEvidence] = useState('')
+
+  const refreshQAEnvironment = useCallback(async (taskID: number) => {
+    const environment = await api<QAEnvironment>(`/api/tasks/${taskID}/environment`)
+    setQAEnvironment(environment)
+    if (environment.status === 'starting') {
+      setQAFailureMessage('')
+      setQALogsError('')
+      setQALogs('')
+      return environment
+    }
+
+    let failure: TaskEvent | undefined
+    let eventLoadError: unknown
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const latestEvents = await api<TaskEvent[]>(`/api/tasks/${taskID}/events`)
+        setEvents(latestEvents)
+        failure = [...latestEvents].reverse().find((event) => event.action === 'qa_environment_start_failed')
+        eventLoadError = undefined
+        if (failure || environment.status !== 'unhealthy') break
+      } catch (error) {
+        eventLoadError = error
+        if (environment.status !== 'unhealthy') break
+      }
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 300))
+    }
+    setQAFailureMessage(environment.status === 'unhealthy'
+      ? failure?.reason || (eventLoadError instanceof Error ? eventLoadError.message : 'O ambiente não passou pela inicialização e verificação de saúde.')
+      : '')
+
+    if (environment.status === 'unhealthy') {
+      try {
+        const result = await api<{ logs: string }>(`/api/tasks/${taskID}/environment/logs`)
+        setQALogs(result.logs)
+        setQALogsError('')
+      } catch (error) {
+        setQALogs('')
+        setQALogsError(error instanceof Error ? error.message : 'Não foi possível carregar os logs do ambiente.')
+      }
+    } else {
+      setQALogsError('')
+    }
+    return environment
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -252,12 +301,9 @@ function App() {
     let active = true
     const refresh = async () => {
       try {
-        const environment = await api<QAEnvironment>(`/api/tasks/${taskID}/environment`)
+        const environment = await refreshQAEnvironment(taskID)
         if (!active) return
-        setQAEnvironment(environment)
         if (environment.status !== 'starting') {
-          const latestEvents = await api<TaskEvent[]>(`/api/tasks/${taskID}/events`)
-          if (active) setEvents(latestEvents)
           if (timer !== undefined) window.clearInterval(timer)
         }
       } catch {
@@ -267,7 +313,7 @@ function App() {
     const timer = window.setInterval(() => void refresh(), 1200)
     void refresh()
     return () => { active = false; window.clearInterval(timer) }
-  }, [page, selectedTask?.id, selectedTask?.state])
+  }, [page, selectedTask?.id, selectedTask?.state, qaEnvironment?.status, refreshQAEnvironment])
 
   async function enterFactory(user: User) {
     setCurrentUser(user)
@@ -286,7 +332,11 @@ function App() {
     setMessage('')
     try {
       setSelectedProject(project)
-      setTasks(await api<Task[]>(`/api/projects/${project.id}/tasks`))
+      const projectTasks = await api<Task[]>(`/api/projects/${project.id}/tasks`)
+      setTasks(projectTasks)
+      setTaskSearch('')
+      setProjectView('backlog')
+      setPreviewTaskId(projectTasks[0]?.id ?? null)
       setSelectedTask(null)
       setPage('project')
     } catch (error) {
@@ -327,21 +377,44 @@ function App() {
 
   async function runQAEnvironmentAction(action: 'start' | 'stop' | 'restart') {
     if (!selectedTask) return
+    if (action !== 'stop') {
+      setQAEnvironment((current) => current ? { ...current, status: 'starting', url: undefined } : { projectId: selectedTask.projectId, taskId: selectedTask.id, status: 'starting' })
+      setQAFailureMessage('')
+      setQALogsError('')
+      setQALogs('')
+    }
     setBusy(true); setMessage('')
     try {
       const result = await api<QAEnvironment>(`/api/tasks/${selectedTask.id}/environment/${action}`, { method: 'POST' })
       setQAEnvironment(result)
       if (action === 'stop') setQALogs('')
-      else setQALogs((await api<{ logs: string }>(`/api/tasks/${selectedTask.id}/environment/logs`)).logs)
+      else {
+        setQAFailureMessage('')
+        try {
+          setQALogs((await api<{ logs: string }>(`/api/tasks/${selectedTask.id}/environment/logs`)).logs)
+          setQALogsError('')
+        } catch (error) {
+          setQALogsError(error instanceof Error ? error.message : 'Não foi possível carregar os logs do ambiente.')
+        }
+      }
       setMessage(action === 'stop' ? 'Ambiente de QA parado.' : 'Ambiente saudável e disponível para revisão.')
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível atualizar o ambiente de QA.') }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível atualizar o ambiente de QA.')
+      if (action !== 'stop') {
+        try { await refreshQAEnvironment(selectedTask.id) } catch { /* Keep the failed state message if refresh also fails. */ }
+      }
+    }
     finally { setBusy(false) }
   }
 
   async function refreshQALogs() {
     if (!selectedTask) return
-    try { setQALogs((await api<{ logs: string }>(`/api/tasks/${selectedTask.id}/environment/logs`)).logs) }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível carregar os logs.') }
+    try {
+      setQALogs((await api<{ logs: string }>(`/api/tasks/${selectedTask.id}/environment/logs`)).logs)
+      setQALogsError('')
+    } catch (error) {
+      setQALogsError(error instanceof Error ? error.message : 'Não foi possível carregar os logs.')
+    }
   }
 
   async function createTaskPR() {
@@ -475,10 +548,11 @@ function App() {
     setBusy(true)
     setMessage('')
     try {
-      await api<Task>(`/api/projects/${selectedProject.id}/tasks`, { method: 'POST', body: JSON.stringify({
+      const createdTask = await api<Task>(`/api/projects/${selectedProject.id}/tasks`, { method: 'POST', body: JSON.stringify({
         title: form.get('title'), description: form.get('description'),
       }) })
       setTasks(await api<Task[]>(`/api/projects/${selectedProject.id}/tasks`))
+      setPreviewTaskId(createdTask.id)
       setShowTaskForm(false)
       setMessage('Tarefa criada no estado Aberta.')
     } catch (error) {
@@ -529,7 +603,7 @@ function App() {
       setImplementations(await api<TaskImplementation[]>(`/api/tasks/${updated.id}/implementations`))
       setActionComment('')
       setQAEvidence('')
-      setMessage('Tarefa atualizada e decisão registrada no histórico.')
+      setMessage(action === 'start_correction' ? 'Correção iniciada com as recomendações de QA.' : 'Tarefa atualizada e decisão registrada no histórico.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'A ação não foi concluída.')
     } finally {
@@ -582,6 +656,12 @@ function App() {
   }
 
   const actionButtons: { action: string; label: string; comment?: boolean; evidence?: boolean }[] = []
+  const normalizedTaskSearch = taskSearch.trim().toLocaleLowerCase('pt-BR')
+  const visibleTasks = normalizedTaskSearch
+    ? tasks.filter((task) => [task.title, task.description, task.state, String(task.id)]
+      .some((value) => value.toLocaleLowerCase('pt-BR').includes(normalizedTaskSearch)))
+    : tasks
+  const previewTask = visibleTasks.find((task) => task.id === previewTaskId) ?? null
   if (selectedTask && canOrganize(currentUser?.role) && selectedTask.state === 'Aberta') {
     actionButtons.push({ action: 'mark_ready', label: 'Marcar como pronta' })
   }
@@ -595,7 +675,7 @@ function App() {
     actionButtons.push({ action: 'approve_specification', label: 'Aprovar especificação' })
     actionButtons.push({ action: 'return_specification', label: 'Devolver para ajustes', comment: true })
   }
-  if (selectedTask?.state === 'Aguardando QA' && (currentUser?.role === 'QA' || currentUser?.role === 'Admin')) {
+  if (selectedTask?.state === 'Aguardando QA' && qaEnvironment?.status === 'healthy' && (currentUser?.role === 'QA' || currentUser?.role === 'Admin')) {
     actionButtons.push({ action: 'qa_started', label: 'Iniciar revisão de QA' })
   }
   if (selectedTask?.state === 'Em QA' && (currentUser?.role === 'QA' || currentUser?.role === 'Admin')) {
@@ -664,7 +744,7 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={page === 'project' ? 'app-shell app-shell--wide' : 'app-shell'}>
       <header className="topbar">
         <a className="brand" href="/" aria-label="Fábrica, início">
           <span className="brand-mark" aria-hidden="true">F</span><span>fábrica</span>
@@ -761,14 +841,21 @@ function App() {
         </section>
       ) : page === 'project' && selectedProject ? (
         <section className="project-page" aria-labelledby="project-title">
-          <button className="back-link" type="button" onClick={() => { setPage('projects'); setMessage('') }}>← Todos os projetos</button>
-          <div className="page-heading project-heading">
-            <div><h1 id="project-title">{selectedProject.name}</h1><p className="panel-intro">{selectedProject.description || 'Este projeto ainda não tem descrição.'}</p></div>
-            {canOrganize(currentUser?.role) && <button className="button button--primary" type="button" onClick={() => { setShowTaskForm(!showTaskForm); setMessage('') }}>
+          <div className="project-breadcrumbs">
+            <button className="back-link" type="button" onClick={() => { setPage('projects'); setMessage('') }}>Projetos</button>
+            <span aria-hidden="true">/</span><span>{selectedProject.name}</span>
+          </div>
+          <header className="project-overview">
+            <div className="project-avatar" aria-hidden="true">{selectedProject.name.trim().charAt(0).toLocaleUpperCase('pt-BR') || 'P'}</div>
+            <div className="project-overview-copy">
+              <h1 id="project-title">{selectedProject.name}</h1>
+              <p>{selectedProject.description || 'Projeto da fábrica'}</p>
+              <div className="workspace-line"><span>Workspace</span><code title={selectedProject.workspacePath}>{selectedProject.workspacePath}</code></div>
+            </div>
+            {canOrganize(currentUser?.role) && <button className="button button--primary project-create-button" type="button" onClick={() => { setShowTaskForm(!showTaskForm); setMessage('') }}>
               {showTaskForm ? 'Fechar formulário' : 'Criar tarefa'}
             </button>}
-          </div>
-          <p className="workspace-line"><span>Workspace</span><code>{selectedProject.workspacePath}</code></p>
+          </header>
           {message && <p className="notice" role="status">{message}</p>}
           {showTaskForm && <section className="editor-panel" aria-labelledby="new-task-title">
             <div className="editor-heading"><h2 id="new-task-title">Nova tarefa</h2><span>Uma tarefa nova começa como Aberta</span></div>
@@ -778,18 +865,61 @@ function App() {
               <div className="form-actions"><button className="button button--primary" type="submit" disabled={busy}>{busy ? 'Criando…' : 'Criar tarefa'}</button></div>
             </form>
           </section>}
-          <div className="board-heading"><h2>Quadro de tarefas</h2><span>{tasks.length} {tasks.length === 1 ? 'tarefa' : 'tarefas'}</span></div>
-          {tasks.length ? <div className="task-board">
+          <div className="board-toolbar">
+            <div className="board-title-group"><h2>{projectView === 'backlog' ? 'Backlog' : 'Quadro'}</h2><span>{visibleTasks.length} {visibleTasks.length === 1 ? 'tarefa' : 'tarefas'}</span></div>
+            <label className="board-search">
+              <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false"><circle cx="8.75" cy="8.75" r="5.75" /><path d="m13 13 4 4" /></svg>
+              <span className="visually-hidden">Buscar tarefas no quadro</span>
+              <input type="search" value={taskSearch} onChange={(event) => setTaskSearch(event.target.value)} placeholder="Buscar tarefas" />
+            </label>
+          </div>
+          <div className="project-workspace-layout">
+            <aside className="project-sidebar" aria-label="Navegação do projeto">
+              <div className="project-sidebar-heading"><span className="project-avatar" aria-hidden="true">{selectedProject.name.trim().charAt(0).toLocaleUpperCase('pt-BR') || 'P'}</span><span><strong>{selectedProject.name}</strong><small>Projeto</small></span></div>
+              <div className="project-sidebar-nav" aria-label="Visualizações">
+                <button type="button" className={projectView === 'backlog' ? 'project-sidebar-link project-sidebar-link--active' : 'project-sidebar-link'} aria-current={projectView === 'backlog' ? 'page' : undefined} onClick={() => setProjectView('backlog')}><span aria-hidden="true">☷</span> Backlog</button>
+                <button type="button" className={projectView === 'board' ? 'project-sidebar-link project-sidebar-link--active' : 'project-sidebar-link'} aria-current={projectView === 'board' ? 'page' : undefined} onClick={() => setProjectView('board')}><span aria-hidden="true">▦</span> Quadro</button>
+              </div>
+              <div className="project-sidebar-path"><span>Workspace</span><code title={selectedProject.workspacePath}>{selectedProject.workspacePath}</code></div>
+            </aside>
+            {tasks.length ? normalizedTaskSearch && visibleTasks.length === 0
+            ? <div className="board-empty-state"><strong>Nenhuma tarefa encontrada</strong><span>Tente outro termo ou limpe a busca.</span></div>
+            : projectView === 'backlog' ? <div className="backlog-layout">
+              <div className="backlog-list" aria-label="Tarefas agrupadas por etapa">
+                {taskColumns.map((column) => {
+                  const columnTasks = visibleTasks.filter((task) => column.states.includes(task.state))
+                  if (!columnTasks.length) return null
+                  return <details className="backlog-group" key={column.title} open>
+                    <summary><span className="backlog-chevron" aria-hidden="true">⌄</span><strong>{column.title}</strong><span className="backlog-count">{columnTasks.length}</span></summary>
+                    <div className="backlog-rows">{columnTasks.map((task) => <button className={previewTaskId === task.id ? 'backlog-row backlog-row--selected' : 'backlog-row'} type="button" key={task.id} onClick={() => setPreviewTaskId(task.id)} aria-pressed={previewTaskId === task.id}>
+                      <span className="task-card-key">FAB-{task.id}</span><span className="backlog-row-title">{task.title}</span><span className="task-state" title={task.state}>{task.state}</span>
+                    </button>)}</div>
+                  </details>
+                })}
+              </div>
+              <aside className="task-preview" aria-label="Prévia da tarefa selecionada" aria-live="polite">
+                {previewTask ? <>
+                  <div className="task-preview-meta"><span>FAB-{previewTask.id}</span><button type="button" aria-label="Abrir detalhes completos da tarefa" title="Abrir detalhes completos" onClick={() => void openTask(previewTask)}>↗</button></div>
+                  <h3>{previewTask.title}</h3><span className="task-state">{previewTask.state}</span>
+                  <section><h4>Descrição</h4><p>{previewTask.description || 'Sem descrição.'}</p></section>
+                  <button className="button button--quiet task-preview-open" type="button" onClick={() => void openTask(previewTask)} disabled={busy}>Abrir detalhes completos</button>
+                </> : <div className="task-preview-empty"><span aria-hidden="true">☷</span><strong>Selecione uma tarefa</strong><p>Os detalhes da tarefa aparecerão aqui.</p></div>}
+              </aside>
+            </div> : <div className="task-board" role="region" aria-label="Colunas do quadro de tarefas" tabIndex={0}>
             {taskColumns.map((column) => {
-              const columnTasks = tasks.filter((task) => column.states.includes(task.state))
+              const columnTasks = visibleTasks.filter((task) => column.states.includes(task.state))
               return <section className="task-column" key={column.title} aria-label={`${column.title}: ${columnTasks.length} tarefas`}>
                 <div className="task-column-heading"><h3>{column.title}</h3><span>{columnTasks.length}</span></div>
                 <div className="task-column-body">{columnTasks.length ? columnTasks.map((task) => <button className="task-card" type="button" key={task.id} onClick={() => void openTask(task)}>
-                  <span className="task-card-title">{task.title}</span><span className="task-state">{task.state}</span>
-                </button>) : <p className="column-empty">Sem tarefas</p>}</div>
+                  <span className="task-card-key">FAB-{task.id}</span>
+                  <span className="task-card-title">{task.title}</span>
+                  {task.description && <span className="task-card-description">{task.description}</span>}
+                  <span className="task-state" title={task.state}>{task.state}</span>
+                </button>) : <p className="column-empty">{normalizedTaskSearch ? 'Nenhuma tarefa corresponde à busca' : 'Sem tarefas nesta etapa'}</p>}</div>
               </section>
             })}
-          </div> : <div className="empty-state empty-state--large"><h2>O quadro está vazio</h2><p>{canOrganize(currentUser?.role) ? 'Crie a primeira tarefa para iniciar o fluxo do projeto.' : 'Uma tarefa aparecerá aqui quando for criada.'}</p></div>}
+          </div> : <div className="empty-state empty-state--large"><h2>O backlog está vazio</h2><p>{canOrganize(currentUser?.role) ? 'Crie a primeira tarefa para iniciar o fluxo do projeto.' : 'Uma tarefa aparecerá aqui quando for criada.'}</p></div>}
+          </div>
         </section>
       ) : page === 'task' && selectedTask && selectedProject ? (
         <section className="task-detail-page" aria-labelledby="task-title">
@@ -830,11 +960,12 @@ function App() {
               <section className="qa-environment-panel" aria-labelledby="qa-environment-title">
                 <div className="section-heading"><h2 id="qa-environment-title">Ambiente de QA</h2><span>{qaEnvironment?.status === 'healthy' ? 'Disponível' : qaEnvironment?.status === 'unhealthy' ? 'Health check falhou' : qaEnvironment?.status === 'starting' ? 'Iniciando' : 'Parado'}</span></div>
                 {qaEnvironment?.url && <p className="qa-environment-url"><a href={qaEnvironment.url} target="_blank" rel="noreferrer">Abrir revisão local ↗</a><span>127.0.0.1 · porta {qaEnvironment.port}</span></p>}
+                {qaEnvironment?.status === 'unhealthy' && <div className="qa-environment-error" role="alert"><strong>Não foi possível iniciar o ambiente de revisão.</strong><p>{qaFailureMessage || 'Consulte o histórico para ver o motivo registrado.'}</p>{qaLogsError && <p>Logs indisponíveis: {qaLogsError}</p>}</div>}
                 {selectedTask.state === 'Aguardando QA' || selectedTask.state === 'Em QA' ? <div className="decision-buttons">
-                  {qaEnvironment?.status === 'starting' ? <p role="status">A aplicação está iniciando. O link aparecerá após o health check.</p> : qaEnvironment?.status === 'healthy' ? <><button className="button button--primary" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('restart')}>Reiniciar</button><button className="button button--quiet" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('stop')}>Parar ambiente</button></> : <button className="button button--primary" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('start')}>{busy ? 'Iniciando e verificando…' : 'Iniciar ambiente de revisão'}</button>}
-                  {qaEnvironment?.status === 'healthy' && <button className="text-button text-button--neutral" type="button" onClick={() => void refreshQALogs()}>Atualizar logs</button>}
+                  {qaEnvironment?.status === 'starting' ? <p role="status">A aplicação está iniciando. O link aparecerá após o health check.</p> : qaEnvironment?.status === 'healthy' ? <><button className="button button--primary" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('restart')}>Reiniciar</button><button className="button button--quiet" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('stop')}>Parar ambiente</button></> : <button className="button button--primary" type="button" disabled={busy} onClick={() => void runQAEnvironmentAction('start')}>{busy ? 'Iniciando e verificando…' : qaEnvironment?.status === 'unhealthy' ? 'Tentar iniciar novamente' : 'Iniciar ambiente de revisão'}</button>}
+                  {(qaEnvironment?.status === 'healthy' || qaEnvironment?.status === 'unhealthy') && <button className="text-button text-button--neutral" type="button" onClick={() => void refreshQALogs()}>Atualizar logs</button>}
                 </div> : <p className="empty-state">O ambiente aparece quando a implementação estiver pronta para QA.</p>}
-                {qaLogs && <pre className="qa-environment-logs" aria-label="Logs do serviço de QA">{qaLogs}</pre>}
+                {qaLogs && <pre className="qa-environment-logs" aria-label="Logs dos serviços de QA">{qaLogs}</pre>}
               </section>
               {(selectedTask.state === 'Aguardando PR' || selectedTask.state === 'PR aberto' || selectedTask.state === 'Pronta para merge' || taskPullRequest) && <section className="pull-request-panel" aria-labelledby="pull-request-title">
                 <div className="section-heading"><h2 id="pull-request-title">Pull request</h2><span>{pullRequestChecks ? `Checks: ${phaseStatus(pullRequestChecks)}` : taskPullRequest ? 'Vinculado' : 'Aguardando criação'}</span></div>
@@ -878,6 +1009,10 @@ function App() {
                 {actionButtons.some((item) => item.comment) && <label className="decision-comment">Comentário para o histórico<textarea value={actionComment} onChange={(event) => setActionComment(event.target.value)} rows={3} maxLength={4000} /></label>}
                 {actionButtons.some((item) => item.evidence) && <label className="decision-comment">Evidência de QA (URL, observação ou referência)<textarea value={qaEvidence} onChange={(event) => setQAEvidence(event.target.value)} rows={3} maxLength={4000} /></label>}
                 <div className="decision-buttons">{actionButtons.map((item) => <button className={item.action === 'block' ? 'button button--danger' : 'button button--primary'} type="button" key={item.action} disabled={busy} onClick={() => void performTaskAction(item.action, item.comment, item.evidence)}>{item.label}</button>)}</div>
+              </section>}
+              {selectedTask.state === 'Aguardando QA' && (currentUser?.role === 'QA' || currentUser?.role === 'Admin') && qaEnvironment?.status !== 'healthy' && <section className="decision-panel" aria-labelledby="qa-gate-title">
+                <h2 id="qa-gate-title">Revisão de QA bloqueada</h2>
+                <p>{qaEnvironment?.status === 'starting' ? 'A revisão será liberada quando o ambiente terminar de iniciar e passar pelo health check.' : qaEnvironment?.status === 'unhealthy' ? 'O ambiente falhou no health check. Tente iniciar novamente no painel Ambiente de QA para liberar a revisão.' : 'Inicie o ambiente de revisão no painel Ambiente de QA. A ação de QA será liberada após o health check.'}</p>
               </section>}
             </aside>
           </div>
