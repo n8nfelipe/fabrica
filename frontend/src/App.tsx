@@ -154,6 +154,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const response = await fetch(url, {
     ...options,
+    mode: 'same-origin',
     credentials: 'same-origin',
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
   })
