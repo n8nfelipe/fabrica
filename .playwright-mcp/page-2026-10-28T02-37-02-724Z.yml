@@ -1,0 +1,19 @@
+- main [ref=e3]:
+  - link "Fábrica, início" [ref=e146] [cursor=pointer]:
+    - /url: /
+    - generic [aria-hidden] [ref=e147]: F
+    - generic [ref=e148]: fábrica
+  - region [ref=e149]:
+    - paragraph [ref=e150]: AMBIENTE LOCAL
+    - heading "Entre na fábrica." [level=1] [ref=e151]
+    - paragraph [ref=e152]: Use sua conta individual para acompanhar os projetos da equipe.
+    - generic [ref=e153]:
+      - generic [ref=e154]:
+        - text: Usuário
+        - textbox "Usuário" [ref=e155]
+      - generic [ref=e156]:
+        - text: Senha
+        - textbox "Senha" [ref=e157]
+      - alert [ref=e158]: Sessão encerrada.
+      - button "Entrar" [ref=e159] [cursor=pointer]
+  - paragraph [ref=e160]: A fábrica fica disponível somente nesta máquina.

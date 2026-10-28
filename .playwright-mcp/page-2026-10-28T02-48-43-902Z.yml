@@ -1,0 +1,43 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e21]:
+    - link "Fábrica, início" [ref=f3e22] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=f3e23]: F
+      - generic [ref=f3e24]: fábrica
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]:
+        - generic [ref=f3e27]: Board Admin
+        - generic [ref=f3e28]: Admin
+      - button "Sair" [ref=f3e29] [cursor=pointer]
+  - navigation "Navegação principal" [ref=f3e30]:
+    - button "Projetos" [ref=f3e31] [cursor=pointer]
+    - button "Usuários" [ref=f3e32] [cursor=pointer]
+  - region [ref=f3e33]:
+    - generic [ref=f3e34]:
+      - generic [ref=f3e35]:
+        - heading "Projetos da fábrica" [level=1] [ref=f3e36]
+        - paragraph [ref=f3e37]: Cada projeto tem seu workspace e um fluxo de tarefas próprio.
+      - button "Fechar formulário" [active] [ref=f3e45] [cursor=pointer]
+    - region [ref=f3e46]:
+      - generic [ref=f3e47]:
+        - heading "Novo projeto" [level=2] [ref=f3e48]
+        - generic [ref=f3e49]: O nome também define a pasta do workspace
+      - generic [ref=f3e50]:
+        - generic [ref=f3e51]:
+          - text: Nome do projeto
+          - textbox "Nome do projeto" [ref=f3e52]:
+            - /placeholder: "ex.: portal-cliente"
+        - generic [ref=f3e53]:
+          - text: Descrição
+          - textbox "Descrição" [ref=f3e54]
+        - generic [ref=f3e55]:
+          - text: Stack e requisitos
+          - textbox "Stack e requisitos" [ref=f3e56]:
+            - /placeholder: Tecnologias, integrações e critérios importantes
+        - button "Criar projeto" [ref=f3e58] [cursor=pointer]
+    - generic [ref=f3e39]:
+      - heading "Nenhum projeto ainda" [level=2] [ref=f3e40]
+      - paragraph [ref=f3e41]: Crie um projeto para definir seu workspace e começar a organizar tarefas.
+  - generic [ref=f3e42]:
+    - generic [ref=f3e43]: Fábrica de Software Agêntica
+    - generic [ref=f3e44]: Go · React · PostgreSQL

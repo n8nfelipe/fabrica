@@ -1,0 +1,21 @@
+- main [ref=e3]:
+  - generic [ref=e161]:
+    - link "Fábrica, início" [ref=e162] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=e163]: F
+      - generic [ref=e164]: fábrica
+    - generic [ref=e165]:
+      - generic [ref=e166]:
+        - generic [ref=e167]: UI Developer
+        - generic [ref=e168]: Desenvolvedor
+      - button "Sair" [ref=e169] [cursor=pointer]
+  - region [ref=e170]:
+    - heading "Bem-vindo, UI Developer." [level=1] [ref=e171]
+    - paragraph [ref=e172]:
+      - text: Seu perfil é
+      - strong [ref=e173]: Desenvolvedor
+      - text: . A gestão de contas é restrita ao Admin.
+    - paragraph [ref=e152]: Quando o quadro de projetos estiver disponível, você verá aqui as ações permitidas ao seu perfil.
+  - generic [ref=e174]:
+    - generic [ref=e175]: Fábrica de Software Agêntica
+    - generic [ref=e176]: Go · React · PostgreSQL

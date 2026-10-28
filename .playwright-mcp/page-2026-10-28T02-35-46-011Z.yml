@@ -1,0 +1,22 @@
+- main [ref=e3]:
+  - link "Fábrica, início" [ref=e4] [cursor=pointer]:
+    - /url: /
+    - generic [aria-hidden] [ref=e5]: F
+    - generic [ref=e6]: fábrica
+  - region [ref=e7]:
+    - paragraph [ref=e8]: PRIMEIRO ACESSO
+    - heading "Configure a conta Admin." [level=1] [ref=e9]
+    - paragraph [ref=e10]: Crie a conta que administrará usuários e o fluxo de trabalho.
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - text: Usuário
+        - textbox "Usuário" [ref=e13]
+      - generic [ref=e14]:
+        - text: Nome de exibição
+        - textbox "Nome de exibição" [ref=e15]
+      - generic [ref=e16]:
+        - text: Senha
+        - textbox "Senha Use de 12 a 72 caracteres." [ref=e17]
+        - generic [ref=e18]: Use de 12 a 72 caracteres.
+      - button "Criar conta Admin" [ref=e19] [cursor=pointer]
+  - paragraph [ref=e20]: A fábrica fica disponível somente nesta máquina.

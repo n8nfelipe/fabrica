@@ -1,0 +1,64 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e21]:
+    - link "Fábrica, início" [ref=f3e22] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=f3e23]: F
+      - generic [ref=f3e24]: fábrica
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]:
+        - generic [ref=f3e27]: Board Admin
+        - generic [ref=f3e28]: Admin
+      - button "Sair" [ref=f3e29] [cursor=pointer]
+  - navigation "Navegação principal" [ref=f3e30]:
+    - button "Projetos" [ref=f3e31] [cursor=pointer]
+    - button "Usuários" [ref=f3e32] [cursor=pointer]
+  - region [ref=f3e69]:
+    - button "← Todos os projetos" [ref=f3e70] [cursor=pointer]
+    - generic [ref=f3e71]:
+      - generic [ref=f3e72]:
+        - heading "checkout-app" [level=1] [ref=f3e73]
+        - paragraph [ref=f3e74]: Fluxo de compra web
+      - button "Criar tarefa" [ref=f3e97] [cursor=pointer]
+    - paragraph [ref=f3e76]:
+      - generic [ref=f3e77]: Workspace
+      - code [ref=f3e78]: /tmp/fabrica_board_verify_20261027/checkout-app
+    - status [ref=f3e98]: Tarefa criada no estado Aberta.
+    - generic [ref=f3e79]:
+      - heading "Quadro de tarefas" [level=2] [ref=f3e80]
+      - generic [ref=f3e81]: 1 tarefa
+    - generic [ref=f3e82]:
+      - 'region "Preparação: 1 tarefas" [ref=f3e99]':
+        - generic [ref=f3e100]:
+          - heading "Preparação" [level=3] [ref=f3e101]
+          - generic [ref=f3e102]: "1"
+        - button "Build checkout form Aberta" [ref=f3e104] [cursor=pointer]:
+          - generic [ref=f3e105]: Build checkout form
+          - generic [ref=f3e106]: Aberta
+      - 'region "Especificação: 0 tarefas" [ref=f3e107]':
+        - generic [ref=f3e108]:
+          - heading "Especificação" [level=3] [ref=f3e109]
+          - generic [ref=f3e110]: "0"
+        - paragraph [ref=f3e112]: Sem tarefas
+      - 'region "Implementação: 0 tarefas" [ref=f3e113]':
+        - generic [ref=f3e114]:
+          - heading "Implementação" [level=3] [ref=f3e115]
+          - generic [ref=f3e116]: "0"
+        - paragraph [ref=f3e118]: Sem tarefas
+      - 'region "QA: 0 tarefas" [ref=f3e119]':
+        - generic [ref=f3e120]:
+          - heading "QA" [level=3] [ref=f3e121]
+          - generic [ref=f3e122]: "0"
+        - paragraph [ref=f3e124]: Sem tarefas
+      - 'region "Entrega: 0 tarefas" [ref=f3e125]':
+        - generic [ref=f3e126]:
+          - heading "Entrega" [level=3] [ref=f3e127]
+          - generic [ref=f3e128]: "0"
+        - paragraph [ref=f3e130]: Sem tarefas
+      - 'region "Finalizadas: 0 tarefas" [ref=f3e131]':
+        - generic [ref=f3e132]:
+          - heading "Finalizadas" [level=3] [ref=f3e133]
+          - generic [ref=f3e134]: "0"
+        - paragraph [ref=f3e136]: Sem tarefas
+  - generic [ref=f3e42]:
+    - generic [ref=f3e43]: Fábrica de Software Agêntica
+    - generic [ref=f3e44]: Go · React · PostgreSQL

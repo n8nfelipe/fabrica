@@ -1,0 +1,47 @@
+- main [ref=e3]:
+  - generic [ref=e21]:
+    - link "Fábrica, início" [ref=e22] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=e23]: F
+      - generic [ref=e24]: fábrica
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]: UI Admin
+        - generic [ref=e28]: Admin
+      - button "Sair" [ref=e29] [cursor=pointer]
+  - region [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e32]:
+        - paragraph [ref=e33]: ADMINISTRAÇÃO
+        - heading "Contas da fábrica" [level=1] [ref=e34]
+        - paragraph [ref=e35]: Gerencie acessos e defina o papel de cada pessoa no fluxo.
+      - button "Adicionar usuário" [ref=e77] [cursor=pointer]
+    - status [ref=e113]: A conta de Quality Lead foi desativada.
+    - table [ref=e38]:
+      - rowgroup [ref=e39]:
+        - row [ref=e40]:
+          - columnheader "Pessoa" [ref=e41]
+          - columnheader "Perfil" [ref=e42]
+          - columnheader "Estado" [ref=e43]
+          - columnheader "Ações" [ref=e44]
+      - rowgroup [ref=e46]:
+        - row [ref=e47]:
+          - cell "UI Admin @ui.admin" [ref=e48]:
+            - generic [ref=e49]: UI Admin
+            - generic [ref=e50]: "@ui.admin"
+          - cell "Admin" [ref=e51]
+          - cell "Ativa" [ref=e53]
+          - cell [ref=e55]:
+            - button "Editar" [ref=e56] [cursor=pointer]
+        - row [ref=e114]:
+          - cell "Quality Lead @ui.qa" [ref=e108]:
+            - generic [ref=e81]: Quality Lead
+            - generic [ref=e82]: "@ui.qa"
+          - cell "QA" [ref=e83]
+          - cell "Desativada" [ref=e115]
+          - cell [ref=e116]:
+            - button "Editar" [ref=e88] [cursor=pointer]
+    - paragraph [ref=e57]: Contas desativadas permanecem no histórico e não podem iniciar sessão.
+  - generic [ref=e58]:
+    - generic [ref=e59]: Fábrica de Software Agêntica
+    - generic [ref=e60]: Go · React · PostgreSQL

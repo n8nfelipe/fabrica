@@ -1,0 +1,49 @@
+name: Release tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Create annotated SemVer tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create and push next release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git tag --points-at HEAD)" ]]; then
+            echo "HEAD already has a tag; skipping release."
+            exit 0
+          fi
+
+          latest="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ -z "$latest" ]]; then
+            next="v1.0.0"
+          else
+            if [[ ! "$latest" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Latest release tag is not SemVer: $latest" >&2
+              exit 1
+            fi
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[3]}"
+            messages="$(git log "${latest}..HEAD" --format='%s%n%b')"
+            if grep -Eq '(^|[^[:alnum:]])(BREAKING CHANGE:|[a-z]+(\([^)]+\))?!:)' <<< "$messages"; then
+              next="v$((major + 1)).0.0"
+            elif grep -Eq '(^|[^[:alnum:]])feat(\([^)]+\))?:' <<< "$messages"; then
+              next="v${major}.$((minor + 1)).0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+
+          git tag -a "$next" -m "Release $next"
+          git push origin "$next"

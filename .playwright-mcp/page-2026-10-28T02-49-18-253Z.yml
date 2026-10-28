@@ -1,0 +1,73 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e21]:
+    - link "Fábrica, início" [ref=f3e22] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=f3e23]: F
+      - generic [ref=f3e24]: fábrica
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]:
+        - generic [ref=f3e27]: Board Admin
+        - generic [ref=f3e28]: Admin
+      - button "Sair" [ref=f3e29] [cursor=pointer]
+  - navigation "Navegação principal" [ref=f3e30]:
+    - button "Projetos" [ref=f3e31] [cursor=pointer]
+    - button "Usuários" [ref=f3e32] [cursor=pointer]
+  - region [ref=f3e137]:
+    - button "← checkout-app" [ref=f3e138] [cursor=pointer]
+    - generic [ref=f3e71]:
+      - generic [ref=f3e72]:
+        - paragraph [ref=f3e139]: checkout-app
+        - heading "Build checkout form" [level=1] [ref=f3e140]
+      - generic [ref=f3e141]: Pronta
+    - generic [ref=f3e142]:
+      - generic [ref=f3e143]:
+        - region [ref=f3e144]:
+          - heading "Próxima ação" [level=2] [ref=f3e145]
+          - paragraph [ref=f3e146]: OpenCode deve gerar os artefatos de especificação para revisão do PO.
+        - status [ref=f3e183]: Tarefa atualizada e decisão registrada no histórico.
+        - region [ref=f3e147]:
+          - generic [ref=f3e148]:
+            - heading "Descrição" [level=2] [ref=f3e149]
+            - button "Editar" [ref=f3e150] [cursor=pointer]
+          - paragraph [ref=f3e151]: Create payment details form and validation
+        - region [ref=f3e152]:
+          - generic [ref=f3e153]:
+            - heading "Histórico da tarefa" [level=2] [ref=f3e154]
+            - generic [ref=f3e155]: 1 registros
+          - list [ref=f3e184]:
+            - listitem [ref=f3e185]:
+              - generic [ref=f3e187]:
+                - generic [ref=f3e188]:
+                  - strong [ref=f3e189]: Board Admin
+                  - generic [ref=f3e190]: Admin
+                  - time [ref=f3e191]: 27/10/2026, 23:49:17
+                - paragraph [ref=f3e192]: mark ready · transition
+                - paragraph [ref=f3e193]: Aberta → Pronta
+      - complementary "Estado e decisões" [ref=f3e157]:
+        - generic [ref=f3e158]:
+          - heading "Fases" [level=2] [ref=f3e159]
+          - generic [ref=f3e160]:
+            - generic [ref=f3e161]:
+              - term [ref=f3e162]: Especificação
+              - definition [ref=f3e163]: not started
+            - generic [ref=f3e164]:
+              - term [ref=f3e165]: Implementação
+              - definition [ref=f3e166]: not started
+            - generic [ref=f3e167]:
+              - term [ref=f3e168]: QA
+              - definition [ref=f3e169]: not started
+            - generic [ref=f3e170]:
+              - term [ref=f3e171]: Pull request
+              - definition [ref=f3e172]: not created
+            - generic [ref=f3e173]:
+              - term [ref=f3e174]: Checks
+              - definition [ref=f3e175]: unknown
+        - region [ref=f3e176]:
+          - heading "Ações disponíveis" [level=2] [ref=f3e177]
+          - generic [ref=f3e178]:
+            - text: Comentário para o histórico
+            - textbox "Comentário para o histórico" [ref=f3e179]
+          - button "Bloquear tarefa" [ref=f3e182] [cursor=pointer]
+  - generic [ref=f3e42]:
+    - generic [ref=f3e43]: Fábrica de Software Agêntica
+    - generic [ref=f3e44]: Go · React · PostgreSQL

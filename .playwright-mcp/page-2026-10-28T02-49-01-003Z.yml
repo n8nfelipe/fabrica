@@ -1,0 +1,45 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e21]:
+    - link "Fábrica, início" [ref=f3e22] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=f3e23]: F
+      - generic [ref=f3e24]: fábrica
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]:
+        - generic [ref=f3e27]: Board Admin
+        - generic [ref=f3e28]: Admin
+      - button "Sair" [ref=f3e29] [cursor=pointer]
+  - navigation "Navegação principal" [ref=f3e30]:
+    - button "Projetos" [ref=f3e31] [cursor=pointer]
+    - button "Usuários" [ref=f3e32] [cursor=pointer]
+  - region [ref=f3e69]:
+    - button "← Todos os projetos" [ref=f3e70] [cursor=pointer]
+    - generic [ref=f3e71]:
+      - generic [ref=f3e72]:
+        - heading "checkout-app" [level=1] [ref=f3e73]
+        - paragraph [ref=f3e74]: Fluxo de compra web
+      - button "Fechar formulário" [active] [ref=f3e85] [cursor=pointer]
+    - paragraph [ref=f3e76]:
+      - generic [ref=f3e77]: Workspace
+      - code [ref=f3e78]: /tmp/fabrica_board_verify_20261027/checkout-app
+    - region [ref=f3e86]:
+      - generic [ref=f3e87]:
+        - heading "Nova tarefa" [level=2] [ref=f3e88]
+        - generic [ref=f3e89]: Uma tarefa nova começa como Aberta
+      - generic [ref=f3e90]:
+        - generic [ref=f3e91]:
+          - text: Título
+          - textbox "Título" [ref=f3e92]
+        - generic [ref=f3e93]:
+          - text: Descrição
+          - textbox "Descrição" [ref=f3e94]
+        - button "Criar tarefa" [ref=f3e96] [cursor=pointer]
+    - generic [ref=f3e79]:
+      - heading "Quadro de tarefas" [level=2] [ref=f3e80]
+      - generic [ref=f3e81]: 0 tarefas
+    - generic [ref=f3e82]:
+      - heading "O quadro está vazio" [level=2] [ref=f3e83]
+      - paragraph [ref=f3e84]: Crie a primeira tarefa para iniciar o fluxo do projeto.
+  - generic [ref=f3e42]:
+    - generic [ref=f3e43]: Fábrica de Software Agêntica
+    - generic [ref=f3e44]: Go · React · PostgreSQL

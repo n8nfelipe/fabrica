@@ -1,0 +1,55 @@
+- main [ref=e3]:
+  - generic [ref=e191]:
+    - link "Fábrica, início" [ref=e192] [cursor=pointer]:
+      - /url: /
+      - generic [aria-hidden] [ref=e193]: F
+      - generic [ref=e194]: fábrica
+    - generic [ref=e195]:
+      - generic [ref=e196]:
+        - generic [ref=e197]: UI Admin
+        - generic [ref=e198]: Admin
+      - button "Sair" [ref=e199] [cursor=pointer]
+  - region [ref=e200]:
+    - generic [ref=e201]:
+      - generic [ref=e202]:
+        - paragraph [ref=e203]: ADMINISTRAÇÃO
+        - heading "Contas da fábrica" [level=1] [ref=e204]
+        - paragraph [ref=e205]: Gerencie acessos e defina o papel de cada pessoa no fluxo.
+      - button "Adicionar usuário" [ref=e206] [cursor=pointer]
+    - table [ref=e208]:
+      - rowgroup [ref=e209]:
+        - row [ref=e210]:
+          - columnheader "Pessoa" [ref=e211]
+          - columnheader "Perfil" [ref=e212]
+          - columnheader "Estado" [ref=e213]
+          - columnheader "Ações" [ref=e214]
+      - rowgroup [ref=e216]:
+        - row [ref=e217]:
+          - cell "UI Admin @ui.admin" [ref=e218]:
+            - generic [ref=e219]: UI Admin
+            - generic [ref=e220]: "@ui.admin"
+          - cell "Admin" [ref=e221]
+          - cell "Ativa" [ref=e223]
+          - cell [ref=e225]:
+            - button "Editar" [ref=e226] [cursor=pointer]
+        - row [ref=e227]:
+          - cell "Quality Lead @ui.qa" [ref=e228]:
+            - generic [ref=e229]: Quality Lead
+            - generic [ref=e230]: "@ui.qa"
+          - cell "QA" [ref=e231]
+          - cell "Desativada" [ref=e233]
+          - cell [ref=e235]:
+            - button "Editar" [ref=e236] [cursor=pointer]
+        - row [ref=e237]:
+          - cell "UI Developer @ui.dev" [ref=e238]:
+            - generic [ref=e239]: UI Developer
+            - generic [ref=e240]: "@ui.dev"
+          - cell "Desenvolvedor" [ref=e241]
+          - cell "Ativa" [ref=e243]
+          - cell [ref=e245]:
+            - button "Editar" [ref=e246] [cursor=pointer]
+            - button "Desativar" [ref=e247] [cursor=pointer]
+    - paragraph [ref=e248]: Contas desativadas permanecem no histórico e não podem iniciar sessão.
+  - generic [ref=e249]:
+    - generic [ref=e250]: Fábrica de Software Agêntica
+    - generic [ref=e251]: Go · React · PostgreSQL
