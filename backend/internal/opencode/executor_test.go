@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -102,5 +103,38 @@ func TestRunRejectsProjectOutsideWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(project); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTerminateProcessGroupValidatesIdentityAndStopsChild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("process identity is read from Linux /proc")
+	}
+	if !errors.Is(TerminateProcessGroup(0, "token"), os.ErrProcessDone) || !errors.Is(TerminateProcessGroup(1, ""), os.ErrProcessDone) {
+		t.Fatal("invalid process identity should be rejected")
+	}
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", "sleep 30")
+	configureProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	identity := processIdentity(cmd.Process.Pid)
+	if identity == "" {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal("could not read child process identity")
+	}
+	if err := TerminateProcessGroup(cmd.Process.Pid, "stale-token"); !errors.Is(err, os.ErrProcessDone) {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf("stale identity error=%v", err)
+	}
+	if err := TerminateProcessGroup(cmd.Process.Pid, identity); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("terminated process should return an exit error")
 	}
 }

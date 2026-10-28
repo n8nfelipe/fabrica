@@ -17,6 +17,47 @@ func TestValidateProjectName(t *testing.T) {
 	}
 }
 
+func TestRootResolvesConfiguredAndTildePaths(t *testing.T) {
+	root, err := Root("  ./workspace-root  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(root) || filepath.Base(root) != "workspace-root" {
+		t.Fatalf("configured root=%q", root)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, configured := range []string{"~", "~/fabrica-workspace"} {
+		got, err := Root(configured)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := home
+		if configured != "~" {
+			want = filepath.Join(home, "fabrica-workspace")
+		}
+		if got != want {
+			t.Errorf("Root(%q)=%q want %q", configured, got, want)
+		}
+	}
+}
+
+func TestRootDefaultsToHomeWorkspace(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Root("  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(home, "workspace") {
+		t.Fatalf("default root=%q", got)
+	}
+}
+
 func TestCreateProjectDoesNotOverwriteExistingPath(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "existing")
@@ -52,5 +93,23 @@ func TestCreateProjectCreatesChildOfWorkspace(t *testing.T) {
 	info, err := os.Stat(project)
 	if err != nil || !info.IsDir() {
 		t.Fatalf("project workspace was not created: %v", err)
+	}
+}
+
+func TestCreateProjectResolvesSymlinkedWorkspaceAndRejectsInvalidName(t *testing.T) {
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "workspace-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	project, err := CreateProject(link, "safe-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project != filepath.Join(target, "safe-project") {
+		t.Fatalf("project path=%q", project)
+	}
+	if _, err := CreateProject(link, "../outside"); err == nil {
+		t.Fatal("invalid project name should be rejected")
 	}
 }
