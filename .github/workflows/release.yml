@@ -19,6 +19,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           if [[ -n "$(git tag --points-at HEAD)" ]]; then
             echo "HEAD already has a tag; skipping release."
             exit 0
