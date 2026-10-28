@@ -23,9 +23,10 @@ jobs:
         run: |
           go test -coverprofile=../coverage.out ./...
           module_path="$(go list -m)"
-          awk -v module="$module_path" 'NR == 1 { print; next } {
+          module_root="$(pwd)"
+          awk -v module="$module_path" -v module_root="$module_root" 'NR == 1 { print; next } {
             prefix = module "/"
-            if (index($0, prefix) == 1) $0 = "backend/" substr($0, length(prefix) + 1)
+            if (index($0, prefix) == 1) $0 = module_root "/" substr($0, length(prefix) + 1)
             print
           }' ../coverage.out > ../coverage.normalized.out
           mv ../coverage.normalized.out ../coverage.out
