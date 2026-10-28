@@ -22,11 +22,15 @@ O sistema MUST usar o GitHub CLI autenticado no executor para criar um pull requ
 - **THEN** o sistema registra a falha sem marcar o PR como criado e permite retentativa autorizada
 
 ### Requirement: Verificar pull requests
-O workflow de CI MUST ser acionado somente em eventos de pull request e executar verificações de testes, lint, typecheck e análise estática.
+O workflow de CI MUST ser acionado somente em eventos de pull request e executar verificações de testes, lint, typecheck e análise estática. O job MUST gerar o relatório de cobertura Go antes da análise CI-based do SonarQube Cloud e configurar o scanner para importar esse relatório.
 
 #### Scenario: Abrir ou atualizar PR
 - **WHEN** pull request é aberto ou atualizado
 - **THEN** o workflow executa as verificações de qualidade exigidas
+
+#### Scenario: Importar cobertura Go no SonarQube Cloud
+- **WHEN** o workflow analisa um pull request
+- **THEN** os testes geram `backend/coverage.out` e o SonarScanner importa o relatório na análise do projeto
 
 #### Scenario: Integrar na branch principal
 - **WHEN** commit é enviado à branch `main` após merge

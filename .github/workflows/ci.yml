@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
@@ -22,6 +24,10 @@ jobs:
       - name: Static analysis
         working-directory: backend
         run: go vet ./...
+      - name: SonarQube Cloud analysis
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   frontend:
     name: Frontend checks
