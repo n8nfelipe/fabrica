@@ -250,7 +250,6 @@ function App() {
     const qaReady = selectedTask?.state === 'Aguardando QA' || selectedTask?.state === 'Em QA'
     if (page !== 'task' || !taskID || !qaReady) return
     let active = true
-    let timer: number | undefined
     const refresh = async () => {
       try {
         const environment = await api<QAEnvironment>(`/api/tasks/${taskID}/environment`)
@@ -265,7 +264,7 @@ function App() {
         // Keep checking while the server is bringing the QA environment up.
       }
     }
-    timer = window.setInterval(() => void refresh(), 1200)
+    const timer = window.setInterval(() => void refresh(), 1200)
     void refresh()
     return () => { active = false; window.clearInterval(timer) }
   }, [page, selectedTask?.id, selectedTask?.state])
