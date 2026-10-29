@@ -1,0 +1,29 @@
+name: SonarQube Cloud main analysis
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sonar:
+    name: Main branch coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Tests and coverage
+        run: ./scripts/generate-go-coverage.sh
+      - name: Verify coverage report
+        run: test -s coverage.out
+      - name: SonarQube Cloud analysis
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
