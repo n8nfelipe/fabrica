@@ -1145,6 +1145,87 @@ func TestRestartQAEnvironmentUsesExistingPortLeaseAndHealthCheck(t *testing.T) {
 	}
 }
 
+func TestRestartQAEnvironmentStopsAndReleasesPortWhenHealthCheckFails(t *testing.T) {
+	root, binary := projectComposeFixture(t)
+	script := "#!/bin/sh\ncase \"$*\" in\n *'config --services'*) echo web ;;\n *'ps --format json'*) echo '{\"ID\":\"id\",\"Name\":\"web-1\",\"Project\":\"fabrica-2\",\"Service\":\"web\",\"State\":\"running\",\"Health\":\"healthy\",\"ExitCode\":0}' ;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	const projectID, taskID, port = int64(2), int64(33), 41033
+	h := &Handler{
+		db:      db,
+		compose: environments.ComposeManager{DockerPath: binary},
+		ports:   environments.NewPortAllocator(db),
+		qaHealthCheck: func(context.Context, int, string) (string, error) {
+			return "", errors.New("health endpoint unavailable")
+		},
+	}
+	mock.ExpectQuery(`SELECT t.project_id,t.state,p.workspace_path FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=\$1`).WithArgs(taskID).
+		WillReturnRows(sqlmock.NewRows([]string{"project_id", "state", "workspace_path"}).AddRow(projectID, string(workflow.StateInQA), root))
+	query := `INSERT INTO project_qa_environments\(project_id,task_id,status,url,port,health_checked_at\)`
+	mock.ExpectExec(query).WithArgs(projectID, taskID, "starting", "", nil).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT pg_advisory_xact_lock\(\$1\)`).WithArgs(int64(846029117)).WillReturnRows(sqlmock.NewRows([]string{"lock"}).AddRow(nil))
+	mock.ExpectQuery(`SELECT id, project_id, host, port, status FROM qa_port_leases WHERE project_id=\$1 AND status='active' FOR UPDATE`).WithArgs(projectID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "host", "port", "status"}).AddRow(11, projectID, "127.0.0.1", port, "active"))
+	mock.ExpectCommit()
+	mock.ExpectExec(`UPDATE qa_port_leases SET status='released', released_at=now\(\) WHERE project_id=\$1 AND status='active'`).WithArgs(projectID).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(query).WithArgs(projectID, taskID, "unhealthy", "", port).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	environment, err := h.startQAEnvironmentForTask(context.Background(), taskID, "restart")
+	if err == nil || !strings.Contains(err.Error(), "health endpoint unavailable") || environment.Status != "unhealthy" || environment.Port != port {
+		t.Fatalf("restart environment=%#v err=%v", environment, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRestartQAEnvironmentReleasesPortWhenHealthyStateCannotBeSaved(t *testing.T) {
+	root, binary := projectComposeFixture(t)
+	script := "#!/bin/sh\ncase \"$*\" in\n *'config --services'*) echo web ;;\n *'ps --format json'*) echo '{\"ID\":\"id\",\"Name\":\"web-1\",\"Project\":\"fabrica-2\",\"Service\":\"web\",\"State\":\"running\",\"Health\":\"healthy\",\"ExitCode\":0}' ;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	const projectID, taskID, port = int64(2), int64(34), 41034
+	h := &Handler{
+		db:      db,
+		compose: environments.ComposeManager{DockerPath: binary},
+		ports:   environments.NewPortAllocator(db),
+		qaHealthCheck: func(context.Context, int, string) (string, error) {
+			return "http://127.0.0.1:41034/", nil
+		},
+	}
+	mock.ExpectQuery(`SELECT t.project_id,t.state,p.workspace_path FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=\$1`).WithArgs(taskID).
+		WillReturnRows(sqlmock.NewRows([]string{"project_id", "state", "workspace_path"}).AddRow(projectID, string(workflow.StateInQA), root))
+	query := `INSERT INTO project_qa_environments\(project_id,task_id,status,url,port,health_checked_at\)`
+	mock.ExpectExec(query).WithArgs(projectID, taskID, "starting", "", nil).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT pg_advisory_xact_lock\(\$1\)`).WithArgs(int64(846029117)).WillReturnRows(sqlmock.NewRows([]string{"lock"}).AddRow(nil))
+	mock.ExpectQuery(`SELECT id, project_id, host, port, status FROM qa_port_leases WHERE project_id=\$1 AND status='active' FOR UPDATE`).WithArgs(projectID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "project_id", "host", "port", "status"}).AddRow(12, projectID, "127.0.0.1", port, "active"))
+	mock.ExpectCommit()
+	mock.ExpectExec(query).WithArgs(projectID, taskID, "healthy", "http://127.0.0.1:41034/", port).WillReturnError(errors.New("database unavailable"))
+	mock.ExpectExec(`UPDATE qa_port_leases SET status='released', released_at=now\(\) WHERE project_id=\$1 AND status='active'`).WithArgs(projectID).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if _, err := h.startQAEnvironmentForTask(context.Background(), taskID, "restart"); err == nil || !strings.Contains(err.Error(), "could not persist QA environment") {
+		t.Fatalf("restart error=%v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateTaskPullRequestUsesFakeGitHubAndMockDB(t *testing.T) {
 	projectRoot := t.TempDir()
 	bare := filepath.Join(t.TempDir(), "origin.git")
