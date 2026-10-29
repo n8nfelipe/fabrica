@@ -60,3 +60,79 @@ func TestCreatePullRequestAndParseRequiredChecks(t *testing.T) {
 		t.Fatalf("checks = %#v, %v", checks, err)
 	}
 }
+
+func TestFindViewAndMergePullRequest(t *testing.T) {
+	directory := t.TempDir()
+	binary := filepath.Join(directory, "fake-gh")
+	script := "#!/bin/sh\ncase \"$1 $2 $3\" in\n  'pr view feature') echo '{\"number\":9,\"url\":\"https://github.com/acme/demo/pull/9\"}' ;;\n  'pr view 9') echo '{\"state\":\"MERGED\",\"url\":\"https://github.com/acme/demo/pull/9\",\"number\":9}' ;;\n  'pr merge 9') echo merged ;;\nesac\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	client := Client{Binary: binary}
+	pull, err := client.FindPullRequest(context.Background(), directory, "feature")
+	if err != nil || pull.Number != 9 {
+		t.Fatalf("FindPullRequest=%#v %v", pull, err)
+	}
+	state, err := client.ViewPullRequest(context.Background(), directory, 9)
+	if err != nil || state.State != "MERGED" {
+		t.Fatalf("ViewPullRequest=%#v %v", state, err)
+	}
+	if err := client.MergePullRequest(context.Background(), directory, 9); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.FindPullRequest(context.Background(), directory, " "); err == nil {
+		t.Fatal("empty branch should fail")
+	}
+	if _, err := client.ViewPullRequest(context.Background(), directory, 0); err == nil {
+		t.Fatal("invalid PR number should fail")
+	}
+	if err := client.MergePullRequest(context.Background(), directory, 0); err == nil {
+		t.Fatal("invalid merge number should fail")
+	}
+}
+
+func TestBoundedBufferTruncatesWithoutShortWrite(t *testing.T) {
+	buffer := boundedBuffer{limit: 4}
+	n, err := buffer.Write([]byte("abcdef"))
+	if err != nil || n != 6 || buffer.String() != "abcd" {
+		t.Fatalf("buffer write n=%d err=%v content=%q", n, err, buffer.String())
+	}
+}
+
+func TestPullRequestClientRejectsMalformedResponsesAndRecoversExistingPR(t *testing.T) {
+	directory := t.TempDir()
+	binary := filepath.Join(directory, "fake-gh")
+	write := func(script string) {
+		t.Helper()
+		if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := Client{Binary: binary}
+	if _, err := client.Run(context.Background(), directory); err == nil {
+		t.Fatal("Run should reject an empty command")
+	}
+	if _, err := client.CreatePullRequest(context.Background(), directory, "", "body", "branch"); err == nil {
+		t.Fatal("CreatePullRequest should validate required fields")
+	}
+	write("#!/bin/sh\necho incomplete\n")
+	if _, err := client.CreatePullRequest(context.Background(), directory, "title", "body", "branch"); err == nil {
+		t.Fatal("CreatePullRequest should reject output without a PR URL")
+	}
+	write("#!/bin/sh\ncase \"$2\" in\n create) exit 1 ;;\n view) echo '{\"number\":12,\"url\":\"https://github.com/acme/demo/pull/12\"}' ;;\nesac\n")
+	pull, err := client.CreatePullRequest(context.Background(), directory, "title", "body", "branch")
+	if err != nil || pull.Number != 12 {
+		t.Fatalf("existing PR recovery=%#v err=%v", pull, err)
+	}
+	write("#!/bin/sh\necho not-json\n")
+	if _, err := client.Checks(context.Background(), directory, 12); err == nil {
+		t.Fatal("Checks should reject invalid JSON")
+	}
+	if _, err := client.Checks(context.Background(), directory, 0); err == nil {
+		t.Fatal("Checks should reject invalid PR numbers")
+	}
+	write("#!/bin/sh\ncase \"$1 $2\" in\n 'auth status') echo authenticated ;;\nesac\n")
+	if err := client.CheckAuth(context.Background(), directory); err != nil {
+		t.Fatalf("authenticated CLI returned error: %v", err)
+	}
+}

@@ -30,7 +30,7 @@ O workflow de CI MUST ser acionado somente em eventos de pull request e executar
 
 #### Scenario: Importar cobertura Go no SonarQube Cloud
 - **WHEN** o workflow analisa um pull request
-- **THEN** os testes geram `backend/coverage.out` e o SonarScanner importa o relatório na análise do projeto
+- **THEN** os testes Go geram `coverage.out` na raiz do checkout com caminhos relativos ao checkout, arquivos `*_test.go` são classificados como testes, `vendor` é excluído e o SonarScanner importa a cobertura para os arquivos de produção
 
 #### Scenario: Integrar na branch principal
 - **WHEN** commit é enviado à branch `main` após merge

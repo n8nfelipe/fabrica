@@ -28,14 +28,15 @@ type PortLease struct {
 }
 
 type PortAllocator struct {
-	db    *sql.DB
-	start int
-	end   int
-	host  string
+	db            *sql.DB
+	start         int
+	end           int
+	host          string
+	portAvailable func(string, int) bool
 }
 
 func NewPortAllocator(db *sql.DB) *PortAllocator {
-	return &PortAllocator{db: db, start: DefaultPortStart, end: DefaultPortEnd, host: "127.0.0.1"}
+	return &PortAllocator{db: db, start: DefaultPortStart, end: DefaultPortEnd, host: "127.0.0.1", portAvailable: portAvailable}
 }
 
 func (a *PortAllocator) Reserve(ctx context.Context, projectID int64) (PortLease, error) {
@@ -71,7 +72,7 @@ func (a *PortAllocator) Reserve(ctx context.Context, projectID int64) (PortLease
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qa_port_leases WHERE host=$1 AND port=$2 AND status='active')`, a.host, port).Scan(&allocated); err != nil {
 			return PortLease{}, err
 		}
-		if allocated || !portAvailable(a.host, port) {
+		if allocated || !a.portAvailable(a.host, port) {
 			continue
 		}
 		err := tx.QueryRowContext(ctx, `INSERT INTO qa_port_leases(project_id,host,port,status) VALUES($1,$2,$3,'active') RETURNING id`, projectID, a.host, port).Scan(&lease.ID)

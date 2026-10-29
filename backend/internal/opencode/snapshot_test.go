@@ -36,3 +36,14 @@ func TestCaptureSnapshotAndChangedFiles(t *testing.T) {
 		t.Fatalf("ChangedFiles() = %v, want %v", got, want)
 	}
 }
+
+func TestIsWithinConfinesPathsToRoot(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "nested", "file.go")
+	if !IsWithin(root, inside) {
+		t.Fatalf("path inside root was rejected: %s", inside)
+	}
+	if IsWithin(root, filepath.Join(root+"-other", "file.go")) {
+		t.Fatal("sibling path should not be inside root")
+	}
+}

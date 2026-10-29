@@ -29,6 +29,7 @@ type Handler struct {
 	compose       environments.ComposeManager
 	ports         *environments.PortAllocator
 	github        githubcli.Client
+	qaHealthCheck func(context.Context, int, string) (string, error)
 }
 
 type Project struct {
@@ -455,19 +456,23 @@ func (h *Handler) startQAEnvironmentForTask(ctx context.Context, taskID int64, o
 		}
 	}
 	if err != nil {
-		_ = h.saveQAEnvironment(context.Background(), projectID, taskID, "unhealthy", "", nil)
+		_ = h.saveQAEnvironment(ctx, projectID, taskID, "unhealthy", "", nil)
 		return qaEnvironment{ProjectID: projectID, TaskID: taskID, Status: "unhealthy"}, fmt.Errorf("start Compose project: %w", err)
 	}
-	url, healthErr := waitForQAHealth(ctx, lease.Port, workspacePath)
+	healthCheck := h.qaHealthCheck
+	if healthCheck == nil {
+		healthCheck = waitForQAHealth
+	}
+	url, healthErr := healthCheck(ctx, lease.Port, workspacePath)
 	if healthErr != nil {
-		_ = h.compose.Stop(context.Background(), projectID, workspacePath)
-		_ = h.ports.Release(context.Background(), projectID)
-		_ = h.saveQAEnvironment(context.Background(), projectID, taskID, "unhealthy", "", &lease.Port)
+		_ = h.compose.Stop(ctx, projectID, workspacePath)
+		_ = h.ports.Release(ctx, projectID)
+		_ = h.saveQAEnvironment(ctx, projectID, taskID, "unhealthy", "", &lease.Port)
 		return qaEnvironment{ProjectID: projectID, TaskID: taskID, Status: "unhealthy", Port: lease.Port}, fmt.Errorf("QA service did not become healthy: %w", healthErr)
 	}
 	if err := h.saveQAEnvironment(ctx, projectID, taskID, "healthy", url, &lease.Port); err != nil {
-		_ = h.compose.Stop(context.Background(), projectID, workspacePath)
-		_ = h.ports.Release(context.Background(), projectID)
+		_ = h.compose.Stop(ctx, projectID, workspacePath)
+		_ = h.ports.Release(ctx, projectID)
 		return qaEnvironment{}, fmt.Errorf("could not persist QA environment: %w", err)
 	}
 	return qaEnvironment{ProjectID: projectID, TaskID: taskID, Status: "healthy", URL: url, Port: lease.Port, CheckedAt: timePointer(time.Now().UTC())}, nil

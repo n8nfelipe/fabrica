@@ -377,14 +377,14 @@ type limitedOutput struct {
 func (b *limitedOutput) Write(p []byte) (int, error) {
 	original := len(p)
 	remaining := b.limit - int64(b.buffer.Len())
+	if int64(original) > remaining {
+		b.truncated = true
+	}
 	if remaining > 0 {
 		if int64(len(p)) > remaining {
 			p = p[:remaining]
 		}
 		_, _ = b.buffer.Write(p)
-	}
-	if len(p) < original {
-		b.truncated = true
 	}
 	return original, nil
 }
