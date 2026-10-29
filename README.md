@@ -24,7 +24,7 @@ Aplicação local para coordenar o ciclo de desenvolvimento de software com apoi
 ### Pré-requisitos
 
 - Go 1.22 ou mais recente.
-- Node.js 22 ou mais recente e npm.
+- Node.js 22 ou mais recente e pnpm 12.15.0.
 - Docker Engine com Docker Compose v2.
 - Git, OpenCode e GitHub CLI (`gh`) para usar os fluxos de agente e entrega.
 - Portas `5433` (PostgreSQL), `8080` (API) e `5173` (Vite) disponíveis.
@@ -57,8 +57,8 @@ Em outro terminal, inicie o frontend:
 
 ```sh
 cd frontend
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Acesse <http://127.0.0.1:5173>. O Vite encaminha as chamadas `/api` para a API. A saúde da API e a conexão com o banco podem ser conferidas em:
@@ -75,7 +75,7 @@ Verificações disponíveis:
 
 ```sh
 cd backend && go test ./...
-cd ../frontend && npm run lint && npm run build
+cd ../frontend && pnpm run lint && pnpm run build
 ```
 
 Mais detalhes sobre configuração, descritor de ambiente de QA, GitHub, backup e recuperação estão em [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). A visão de produto está em [docs/PRD.md](docs/PRD.md).

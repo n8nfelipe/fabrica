@@ -32,6 +32,10 @@ O workflow de CI MUST ser acionado somente em eventos de pull request e executar
 - **WHEN** o workflow analisa um pull request
 - **THEN** os testes Go geram `coverage.out` na raiz do checkout com caminhos relativos ao checkout, arquivos `*_test.go` são classificados como testes, `vendor` é excluído e o SonarScanner importa a cobertura para os arquivos de produção
 
+#### Scenario: Instalar dependências do frontend
+- **WHEN** o workflow instala dependências para verificar o frontend
+- **THEN** executa `pnpm install --frozen-lockfile --ignore-scripts` com `frontend/pnpm-lock.yaml` e não executa scripts de instalação de dependências
+
 #### Scenario: Integrar na branch principal
 - **WHEN** commit é enviado à branch `main` após merge
 - **THEN** o workflow de release não executa verificações de PR novamente

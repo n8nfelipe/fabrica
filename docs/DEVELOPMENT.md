@@ -3,7 +3,7 @@
 ## Pré-requisitos
 
 - Go 1.22 ou mais recente.
-- Node.js 22 ou mais recente e npm.
+- Node.js 22 ou mais recente e pnpm 12.15.0.
 - Docker Engine com o plugin Docker Compose v2.
 - Portas locais `5433` (PostgreSQL), `8080` (API) e `5173` (Vite) disponíveis.
 
@@ -47,8 +47,8 @@ Em um terceiro terminal, instale as dependências do frontend e inicie o servido
 
 ```sh
 cd frontend
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Abra <http://127.0.0.1:5173>. O Vite encaminha chamadas `/api` para a API em `127.0.0.1:8080`. Para verificar a saúde da API e do banco:
@@ -134,8 +134,8 @@ O executor é local e usa o usuário do processo da Fábrica para acessar arquiv
 cd backend
 go test ./...
 cd ../frontend
-npm run lint
-npm run build
+pnpm run lint
+pnpm run build
 ```
 
 Esses comandos executam os testes Go, o lint e a compilação de produção do frontend.
