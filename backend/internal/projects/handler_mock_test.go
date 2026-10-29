@@ -85,7 +85,10 @@ func TestListHandlersReturnDatabaseErrorsWithMocks(t *testing.T) {
 			mock.ExpectQuery(`SELECT id, task_id, attempt, status, changed_files, summary, created_at FROM task_implementations`).WithArgs(int64(3)).WillReturnError(errors.New("database unavailable"))
 		}},
 		{name: "agent runs", route: "/api/tasks/3/agent-runs", path: map[string]string{"id": "3"}, call: h.listAgentRuns, prepare: func() {
-			mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(3)).WillReturnError(errors.New("database unavailable"))
+			mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, stdout_redacted, stderr_redacted, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(3)).WillReturnError(errors.New("database unavailable"))
+		}},
+		{name: "all agent runs", route: "/api/agent-runs", call: h.listAllAgentRuns, prepare: func() {
+			mock.ExpectQuery(`SELECT ar.id, ar.task_id, p.name, t.title, ar.phase, ar.attempt, ar.status`).WillReturnError(errors.New("database unavailable"))
 		}},
 	}
 	for _, tc := range cases {
@@ -101,6 +104,31 @@ func TestListHandlersReturnDatabaseErrorsWithMocks(t *testing.T) {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
 		})
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListAllAgentRunsIncludesProjectTaskAndRedactedLogs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now()
+	query := `SELECT ar.id, ar.task_id, p.name, t.title, ar.phase, ar.attempt, ar.status, ar.summary, ar.stdout_redacted, ar.stderr_redacted, ar.result_refs, ar.started_at, ar.finished_at`
+	mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "project_name", "task_title", "phase", "attempt", "status", "summary", "stdout_redacted", "stderr_redacted", "result_refs", "started_at", "finished_at"}).
+		AddRow(71, 18, "Portal", "CRUD de clientes", "implementation", 2, "running", "", "", "", []byte(`null`), now, nil).
+		AddRow(70, 18, "Portal", "CRUD de clientes", "specification", 1, "failed", "generation failed", "redacted output", "redacted diagnostic", []byte(`[]`), now.Add(-time.Minute), now))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/api/agent-runs", nil)
+	(&Handler{db: db}).listAllAgentRuns(w, r)
+	body := w.Body.String()
+	for _, expected := range []string{`"projectName":"Portal"`, `"taskTitle":"CRUD de clientes"`, `"status":"running"`, `"status":"failed"`, `"stdout":"redacted output"`, `"stderr":"redacted diagnostic"`, `"resultRefs":[]`} {
+		if w.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("missing %q from global agent run response: status=%d body=%s", expected, w.Code, body)
+		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -183,7 +211,7 @@ func TestListHandlersRejectMalformedDatabaseRowsWithMocks(t *testing.T) {
 		}
 	})
 	t.Run("agent run JSON", func(t *testing.T) {
-		mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "result_refs", "started_at", "finished_at"}).AddRow(1, 3, "implementation", 1, "succeeded", "bad", []byte("{"), time.Now(), nil))
+		mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, stdout_redacted, stderr_redacted, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(3)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "stdout_redacted", "stderr_redacted", "result_refs", "started_at", "finished_at"}).AddRow(1, 3, "implementation", 1, "succeeded", "bad", "out", "err", []byte("{"), time.Now(), nil))
 		r := httptest.NewRequest("GET", "/api/tasks/3/agent-runs", nil)
 		r.SetPathValue("id", "3")
 		w := httptest.NewRecorder()
@@ -808,7 +836,7 @@ func TestGenerateImplementationPersistsFailureWhenApprovedSpecIsMissing(t *testi
 	now := time.Now()
 	taskCols := []string{"id", "project_id", "title", "description", "state", "specification_status", "implementation_status", "qa_status", "pr_status", "checks_status", "created_by", "created_at", "workspace_path"}
 	mock.ExpectQuery(`SELECT t.id, t.project_id, t.title, t.description, t.state, t.specification_status`).WithArgs(int64(17)).WillReturnRows(sqlmock.NewRows(taskCols).AddRow(17, 3, "Implement", "", "Em desenvolvimento", "approved", "running", "not_started", "not_created", "unknown", 8, now, "/tmp/project"))
-	mock.ExpectQuery(`SELECT artifact_paths FROM task_specifications WHERE task_id=\$1 AND status='approved'`).WithArgs(int64(17)).WillReturnRows(sqlmock.NewRows([]string{"artifact_paths"}))
+	mock.ExpectQuery(`SELECT artifact_paths, write_paths FROM task_specifications WHERE task_id=\$1 AND status='approved'`).WithArgs(int64(17)).WillReturnRows(sqlmock.NewRows([]string{"artifact_paths", "write_paths"}))
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT COALESCE\(MAX\(attempt\),0\)\+1 FROM task_implementations WHERE task_id=\$1`).WithArgs(int64(17)).WillReturnRows(sqlmock.NewRows([]string{"attempt"}).AddRow(2))
 	summary := "approved specification artifacts are unavailable"
@@ -1613,13 +1641,18 @@ func TestTaskHistoryAndArtifactHandlersWithMockDB(t *testing.T) {
 		t.Fatalf("listTaskImplementations=%d %s", w.Code, w.Body.String())
 	}
 
-	mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "result_refs", "started_at", "finished_at"}).AddRow(4, 5, "specification", 1, "succeeded", "done", []byte(`["log"]`), now, now))
+	mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, stdout_redacted, stderr_redacted, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(5)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "stdout_redacted", "stderr_redacted", "result_refs", "started_at", "finished_at"}).
+		AddRow(4, 5, "specification", 1, "succeeded", "done", "agent output", "", []byte(`["log"]`), now, now).
+		AddRow(5, 5, "implementation", 1, "cancelled", "interrupted", "", "", []byte(`null`), now, nil))
 	r = httptest.NewRequest("GET", "/api/tasks/5/agent-runs", nil)
 	r.SetPathValue("id", "5")
 	w = httptest.NewRecorder()
 	h.listAgentRuns(w, r)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "log") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "agent output") || !strings.Contains(w.Body.String(), `"stdout":"agent output"`) {
 		t.Fatalf("listAgentRuns=%d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"resultRefs":["log"]`) || !strings.Contains(w.Body.String(), `"resultRefs":[]`) {
+		t.Fatalf("agent run references were not returned as an array: %s", w.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -1776,7 +1809,7 @@ func TestProjectHandlersHandleMissingRecordsWithMockDB(t *testing.T) {
 	call("listTaskSpecifications", h.listTaskSpecifications, 200)
 	mock.ExpectQuery(`SELECT id, task_id, attempt, status, changed_files, summary, created_at FROM task_implementations`).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "attempt", "status", "changed_files", "summary", "created_at"}))
 	call("listTaskImplementations", h.listTaskImplementations, 200)
-	mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "result_refs", "started_at", "finished_at"}))
+	mock.ExpectQuery(`SELECT id, task_id, phase, attempt, status, summary, stdout_redacted, stderr_redacted, result_refs, started_at, finished_at FROM agent_runs`).WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "phase", "attempt", "status", "summary", "stdout_redacted", "stderr_redacted", "result_refs", "started_at", "finished_at"}))
 	call("listAgentRuns", h.listAgentRuns, 200)
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

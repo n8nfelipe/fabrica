@@ -18,6 +18,7 @@ import (
 	"fabrica/backend/internal/environments"
 	"fabrica/backend/internal/githubcli"
 	"fabrica/backend/internal/opencode"
+	"fabrica/backend/internal/securitygateway"
 	"fabrica/backend/internal/workflow"
 	"fabrica/backend/internal/workspace"
 )
@@ -93,15 +94,19 @@ type TaskImplementation struct {
 }
 
 type AgentRun struct {
-	ID         int64      `json:"id"`
-	TaskID     int64      `json:"taskId"`
-	Phase      string     `json:"phase"`
-	Attempt    int        `json:"attempt"`
-	Status     string     `json:"status"`
-	Summary    string     `json:"summary"`
-	ResultRefs []string   `json:"resultRefs"`
-	StartedAt  time.Time  `json:"startedAt"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	ID          int64      `json:"id"`
+	TaskID      int64      `json:"taskId"`
+	ProjectName string     `json:"projectName,omitempty"`
+	TaskTitle   string     `json:"taskTitle,omitempty"`
+	Phase       string     `json:"phase"`
+	Attempt     int        `json:"attempt"`
+	Status      string     `json:"status"`
+	Summary     string     `json:"summary"`
+	Stdout      string     `json:"stdout"`
+	Stderr      string     `json:"stderr"`
+	ResultRefs  []string   `json:"resultRefs"`
+	StartedAt   time.Time  `json:"startedAt"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 }
 
 type createProjectRequest struct {
@@ -146,6 +151,7 @@ func RegisterRoutesWithExecutor(mux *http.ServeMux, db *sql.DB, workspaceRoot st
 	mux.HandleFunc("GET /api/tasks/{id}/specifications/{round}/artifact", auth.RequireAction(db, auth.ActionViewProgress, h.getTaskSpecificationArtifact))
 	mux.HandleFunc("GET /api/tasks/{id}/implementations", auth.RequireAction(db, auth.ActionViewProgress, h.listTaskImplementations))
 	mux.HandleFunc("GET /api/tasks/{id}/agent-runs", auth.RequireAction(db, auth.ActionViewProgress, h.listAgentRuns))
+	mux.HandleFunc("GET /api/agent-runs", auth.RequireAction(db, auth.ActionViewProgress, h.listAllAgentRuns))
 	mux.HandleFunc("GET /api/tasks/{id}/environment", auth.RequireAction(db, auth.ActionViewProgress, h.getQAEnvironment))
 	mux.HandleFunc("POST /api/tasks/{id}/environment/start", auth.RequireAction(db, auth.ActionPerformQA, h.startQAEnvironment))
 	mux.HandleFunc("POST /api/tasks/{id}/environment/stop", auth.RequireAction(db, auth.ActionPerformQA, h.stopQAEnvironment))
@@ -1002,6 +1008,7 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var approvedWritePaths []string
 	updated, err := workflow.Apply(workflow.Task{
 		State: workflow.State(current.State), SpecificationStatus: current.SpecificationStatus,
 		ImplementationStatus: current.ImplementationStatus, QAStatus: current.QAStatus,
@@ -1026,6 +1033,39 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "unknown workflow action", http.StatusBadRequest)
 		return
+	}
+	if input.Action == workflow.ActionApproveSpecification {
+		var rawArtifactPaths []byte
+		artifactErr := tx.QueryRowContext(r.Context(), `SELECT artifact_paths FROM task_specifications WHERE task_id=$1 AND status='generated' ORDER BY round DESC LIMIT 1`, id).Scan(&rawArtifactPaths)
+		if artifactErr != nil && !errors.Is(artifactErr, sql.ErrNoRows) {
+			http.Error(w, "could not verify generated specification scope", http.StatusInternalServerError)
+			return
+		}
+		if artifactErr != nil || !specificationContainsScopeArtifact(rawArtifactPaths, id) {
+			if eventErr := appendTaskEvent(r.Context(), tx, id, actor.ID, actor.Role, "attempt", string(input.Action), fromState, fromState, "", "Generated specification does not contain a reviewable write scope"); eventErr != nil {
+				http.Error(w, "could not record specification approval attempt", http.StatusInternalServerError)
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				http.Error(w, "could not record specification approval attempt", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "generated specification must include scope.json before approval", http.StatusConflict)
+			return
+		}
+		approvedWritePaths, err = readTaskWriteScope(projectPath, id)
+		if err != nil {
+			if eventErr := appendTaskEvent(r.Context(), tx, id, actor.ID, actor.Role, "attempt", string(input.Action), fromState, fromState, "", "Specification write scope is invalid: "+err.Error()); eventErr != nil {
+				http.Error(w, "could not record specification approval attempt", http.StatusInternalServerError)
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				http.Error(w, "could not record specification approval attempt", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "specification write scope is invalid: "+err.Error(), http.StatusConflict)
+			return
+		}
 	}
 	if input.Action == workflow.ActionStartCorrection {
 		var hasQADecision bool
@@ -1089,7 +1129,15 @@ func (h *Handler) applyTaskAction(w http.ResponseWriter, r *http.Request) {
 		if input.Action == workflow.ActionReturnSpecification {
 			status = "changes_requested"
 		}
-		result, statusErr := tx.ExecContext(r.Context(), `UPDATE task_specifications SET status=$2 WHERE id=(SELECT id FROM task_specifications WHERE task_id=$1 ORDER BY round DESC LIMIT 1) AND status='generated'`, id, status)
+		writePathsJSON := []byte("[]")
+		if input.Action == workflow.ActionApproveSpecification {
+			writePathsJSON, err = json.Marshal(approvedWritePaths)
+			if err != nil {
+				http.Error(w, "could not serialize approved specification scope", http.StatusInternalServerError)
+				return
+			}
+		}
+		result, statusErr := tx.ExecContext(r.Context(), `UPDATE task_specifications SET status=$2, write_paths=$3 WHERE id=(SELECT id FROM task_specifications WHERE task_id=$1 ORDER BY round DESC LIMIT 1) AND status='generated'`, id, status, writePathsJSON)
 		if statusErr != nil {
 			http.Error(w, "could not save specification decision", http.StatusInternalServerError)
 			return
@@ -1177,11 +1225,33 @@ func (h *Handler) generateSpecification(taskID, runID int64) {
 		h.updateAgentRun(context.Background(), runID, "cancelled", "Specification run was no longer active", opencode.Result{}, nil)
 		return
 	}
-	prompt := fmt.Sprintf("Gere somente os artefatos de especificação OpenSpec para a tarefa abaixo. Não implemente código, não altere arquivos de aplicação e não inicie QA. Grave os artefatos em openspec/changes/task-%d/ com proposal.md, design.md, tasks.md e pelo menos uma especificação em specs/<capacidade>/spec.md. Inclua cenários de aceitação verificáveis e mantenha o escopo restrito à tarefa.\n\nProjeto: %s\nRequisitos do projeto: %s\nTarefa: %s\nDescrição: %s", task.ID, task.Title, requirements, task.Title, task.Description)
-	result, runErr := h.opencode.Run(ctx, opencode.Request{WorkspaceRoot: h.workspaceRoot, ProjectDir: projectPath, Prompt: prompt, OnStart: func(pid int, token string) error {
-		_, err := h.db.ExecContext(ctx, `UPDATE agent_runs SET process_pid=$2, process_start_token=$3 WHERE id=$1 AND status='running'`, runID, pid, token)
-		return err
-	}})
+	prompt := buildSpecificationPrompt(task.ID, requirements, task)
+	before, snapshotErr := opencode.CaptureSnapshot(projectPath)
+	var result opencode.Result
+	runErr := snapshotErr
+	if runErr == nil {
+		result, runErr = h.opencode.Run(ctx, opencode.Request{
+			WorkspaceRoot: h.workspaceRoot, ProjectDir: projectPath, TaskID: task.ID,
+			Phase: securitygateway.PhaseSpecification, Prompt: prompt,
+			OnStart: func(pid int, token string) error {
+				_, err := h.db.ExecContext(ctx, `UPDATE agent_runs SET process_pid=$2, process_start_token=$3 WHERE id=$1 AND status='running'`, runID, pid, token)
+				return err
+			},
+		})
+	}
+	if runErr == nil {
+		after, afterErr := opencode.CaptureSnapshot(projectPath)
+		if afterErr != nil {
+			runErr = afterErr
+		} else {
+			policy, policyErr := securitygateway.NewPolicy(projectPath, securitygateway.PhaseSpecification, task.ID, nil, "")
+			if policyErr != nil {
+				runErr = policyErr
+			} else if scopeErr := securitygateway.ValidateChangedFiles(policy, opencode.ChangedFiles(before, after)); scopeErr != nil {
+				runErr = scopeErr
+			}
+		}
+	}
 	artifactPaths, artifactErr := collectSpecificationArtifacts(projectPath, task.ID)
 	if runErr == nil && (artifactErr != nil || !usableSpecification(artifactPaths, task.ID)) {
 		runErr = fmt.Errorf("OpenCode completed without a usable OpenSpec artifact set: %v", artifactErr)
@@ -1261,13 +1331,24 @@ func (h *Handler) generateImplementation(taskID, runID int64) {
 		return
 	}
 	var rawPaths []byte
-	if err := h.db.QueryRowContext(ctx, `SELECT artifact_paths FROM task_specifications WHERE task_id=$1 AND status='approved' ORDER BY round DESC LIMIT 1`, taskID).Scan(&rawPaths); err != nil {
+	var rawWritePaths []byte
+	if err := h.db.QueryRowContext(ctx, `SELECT artifact_paths, write_paths FROM task_specifications WHERE task_id=$1 AND status='approved' ORDER BY round DESC LIMIT 1`, taskID).Scan(&rawPaths, &rawWritePaths); err != nil {
 		h.persistImplementationResult(ctx, task, runID, nil, "failed", "approved specification artifacts are unavailable", opencode.Result{})
 		return
 	}
 	var paths []string
 	if err := json.Unmarshal(rawPaths, &paths); err != nil {
 		h.persistImplementationResult(ctx, task, runID, nil, "failed", "approved specification artifact references are invalid", opencode.Result{})
+		return
+	}
+	var writablePaths []string
+	if err := json.Unmarshal(rawWritePaths, &writablePaths); err != nil {
+		h.persistImplementationResult(ctx, task, runID, nil, "failed", "approved implementation scope is invalid", opencode.Result{})
+		return
+	}
+	policy, err := securitygateway.NewPolicy(projectPath, securitygateway.PhaseImplementation, task.ID, writablePaths, "")
+	if err != nil {
+		h.persistImplementationResult(ctx, task, runID, nil, "failed", "approved implementation scope is unavailable or invalid", opencode.Result{})
 		return
 	}
 	artifactContent, err := readSpecificationArtifacts(projectPath, paths)
@@ -1283,18 +1364,22 @@ func (h *Handler) generateImplementation(taskID, runID int64) {
 		return
 	}
 	if feedbackErr == nil {
-		qaFeedback = fmt.Sprintf("\n\nQA correction recommendations from the latest rejected review:\nComment: %s\nEvidence: %s\nAddress these recommendations while staying within the approved specification scope.", qaComment, qaEvidence)
+		qaFeedback = fmt.Sprintf("Comment: %s\nEvidence: %s", qaComment, qaEvidence)
 	}
 	before, err := opencode.CaptureSnapshot(projectPath)
 	if err != nil {
 		h.persistImplementationResult(ctx, task, runID, nil, "failed", "project workspace could not be inspected before implementation", opencode.Result{})
 		return
 	}
-	prompt := fmt.Sprintf("Implemente a tarefa aprovada a seguir no projeto. Siga os artefatos OpenSpec aprovados e não altere escopo fora deles. Preserve alterações pré-existentes, não modifique artefatos de especificação e não tente executar QA, criar PR ou fazer merge. Para bancos em Docker Compose, conecte a aplicação ao nome do serviço e à porta interna; não publique a porta padrão do banco no host. Só publique o banco no host quando os requisitos pedirem acesso local, usando porta configurável vinculada somente a 127.0.0.1. O serviço de QA deve expor a porta interna indicada pelo descritor, sem fixar porta de host.\n\nTarefa: %s\nDescrição: %s\n\nArtefatos aprovados:\n%s%s", task.Title, task.Description, artifactContent, qaFeedback)
-	result, runErr := h.opencode.Run(ctx, opencode.Request{WorkspaceRoot: h.workspaceRoot, ProjectDir: projectPath, Prompt: prompt, OnStart: func(pid int, token string) error {
-		_, err := h.db.ExecContext(ctx, `UPDATE agent_runs SET process_pid=$2, process_start_token=$3 WHERE id=$1 AND status='running'`, runID, pid, token)
-		return err
-	}})
+	prompt := buildImplementationPrompt(task, artifactContent, qaFeedback, writablePaths)
+	result, runErr := h.opencode.Run(ctx, opencode.Request{
+		WorkspaceRoot: h.workspaceRoot, ProjectDir: projectPath, TaskID: task.ID,
+		Phase: securitygateway.PhaseImplementation, WritablePaths: writablePaths, Prompt: prompt,
+		OnStart: func(pid int, token string) error {
+			_, err := h.db.ExecContext(ctx, `UPDATE agent_runs SET process_pid=$2, process_start_token=$3 WHERE id=$1 AND status='running'`, runID, pid, token)
+			return err
+		},
+	})
 	after, snapshotErr := opencode.CaptureSnapshot(projectPath)
 	changed := []string(nil)
 	if snapshotErr == nil {
@@ -1302,6 +1387,11 @@ func (h *Handler) generateImplementation(taskID, runID int64) {
 	}
 	if snapshotErr != nil && runErr == nil {
 		runErr = snapshotErr
+	}
+	if snapshotErr == nil && runErr == nil {
+		if scopeErr := securitygateway.ValidateChangedFiles(policy, changed); scopeErr != nil {
+			runErr = scopeErr
+		}
 	}
 	status := "succeeded"
 	if runErr != nil || len(changed) == 0 {
@@ -1434,6 +1524,9 @@ func collectSpecificationArtifacts(projectPath string, taskID int64) ([]string, 
 func usableSpecification(paths []string, taskID int64) bool {
 	found := map[string]bool{}
 	for _, path := range paths {
+		if path == fmt.Sprintf("openspec/changes/task-%d/scope.json", taskID) {
+			found["scope"] = true
+		}
 		if path == fmt.Sprintf("openspec/changes/task-%d/proposal.md", taskID) {
 			found["proposal"] = true
 		}
@@ -1447,7 +1540,7 @@ func usableSpecification(paths []string, taskID int64) bool {
 			found["spec"] = true
 		}
 	}
-	return found["proposal"] && found["design"] && found["tasks"] && found["spec"]
+	return found["proposal"] && found["design"] && found["tasks"] && found["spec"] && found["scope"]
 }
 
 func (h *Handler) listTaskEvents(w http.ResponseWriter, r *http.Request) {
@@ -1676,7 +1769,7 @@ func (h *Handler) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id, task_id, phase, attempt, status, summary, result_refs, started_at, finished_at FROM agent_runs WHERE task_id=$1 ORDER BY id`, id)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT id, task_id, phase, attempt, status, summary, stdout_redacted, stderr_redacted, result_refs, started_at, finished_at FROM agent_runs WHERE task_id=$1 ORDER BY id`, id)
 	if err != nil {
 		http.Error(w, "could not read agent runs", http.StatusInternalServerError)
 		return
@@ -1687,13 +1780,61 @@ func (h *Handler) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 		var run AgentRun
 		var rawRefs []byte
 		var finished sql.NullTime
-		if err := rows.Scan(&run.ID, &run.TaskID, &run.Phase, &run.Attempt, &run.Status, &run.Summary, &rawRefs, &run.StartedAt, &finished); err != nil {
+		if err := rows.Scan(&run.ID, &run.TaskID, &run.Phase, &run.Attempt, &run.Status, &run.Summary, &run.Stdout, &run.Stderr, &rawRefs, &run.StartedAt, &finished); err != nil {
 			http.Error(w, "could not read agent runs", http.StatusInternalServerError)
 			return
 		}
 		if err := json.Unmarshal(rawRefs, &run.ResultRefs); err != nil {
 			http.Error(w, "stored run references are invalid", http.StatusInternalServerError)
 			return
+		}
+		if run.ResultRefs == nil {
+			run.ResultRefs = []string{}
+		}
+		if finished.Valid {
+			run.FinishedAt = &finished.Time
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "could not read agent runs", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, runs)
+}
+
+func (h *Handler) listAllAgentRuns(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT ar.id, ar.task_id, p.name, t.title, ar.phase, ar.attempt, ar.status,
+		       ar.summary, ar.stdout_redacted, ar.stderr_redacted, ar.result_refs,
+		       ar.started_at, ar.finished_at
+		FROM agent_runs ar
+		JOIN tasks t ON t.id=ar.task_id
+		JOIN projects p ON p.id=t.project_id
+		ORDER BY ar.started_at DESC, ar.id DESC
+		LIMIT 500
+	`)
+	if err != nil {
+		http.Error(w, "could not read agent runs", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	runs := make([]AgentRun, 0)
+	for rows.Next() {
+		var run AgentRun
+		var rawRefs []byte
+		var finished sql.NullTime
+		if err := rows.Scan(&run.ID, &run.TaskID, &run.ProjectName, &run.TaskTitle, &run.Phase, &run.Attempt,
+			&run.Status, &run.Summary, &run.Stdout, &run.Stderr, &rawRefs, &run.StartedAt, &finished); err != nil {
+			http.Error(w, "could not read agent runs", http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(rawRefs, &run.ResultRefs); err != nil {
+			http.Error(w, "stored run references are invalid", http.StatusInternalServerError)
+			return
+		}
+		if run.ResultRefs == nil {
+			run.ResultRefs = []string{}
 		}
 		if finished.Valid {
 			run.FinishedAt = &finished.Time

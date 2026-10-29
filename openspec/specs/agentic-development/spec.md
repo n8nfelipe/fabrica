@@ -40,11 +40,19 @@ Para tarefa aprovada, o sistema MUST executar OpenCode no workspace do projeto c
 - **THEN** o sistema registra a falha e não libera o QA
 
 ### Requirement: Rastrear execuções de agente
-O sistema MUST persistir para cada execução o projeto, tarefa, fase, agente, horários, estado, resumo de saída e referências a logs ou artefatos, excluindo segredos dos registros.
+O sistema MUST persistir para cada execução o projeto, tarefa, fase, agente, horários, estado, resumo de saída e referências a logs ou artefatos, excluindo segredos dos registros, e MUST oferecer uma visão global de observabilidade para usuários autorizados.
 
 #### Scenario: Consultar execução
 - **WHEN** usuário autorizado consulta uma execução de agente
-- **THEN** o sistema apresenta seu estado e referências ao resultado e aos logs permitidos
+- **THEN** o sistema apresenta seu estado, resumo, saída padrão e erros redigidos, horários e referências aos artefatos
+
+#### Scenario: Acompanhar execução em andamento
+- **WHEN** usuário autorizado consulta uma execução ainda ativa
+- **THEN** o sistema apresenta o estado em andamento e informa que os logs completos estarão disponíveis após o término
+
+#### Scenario: Consultar visão global de observabilidade
+- **WHEN** usuário autorizado abre o menu Observabilidade
+- **THEN** o sistema apresenta execuções recentes de todos os projetos, destaca agentes em execução, permite consultar logs redigidos e mostra gráficos de atividade e estado
 
 #### Scenario: Segredo presente na saída
 - **WHEN** uma saída contém credencial ou segredo conhecido pelo sistema

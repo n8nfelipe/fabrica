@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "writablePaths": [
+    "backend/internal/clients/",
+    "backend/internal/database/migrations/",
+    "frontend/src/clients/",
+    "frontend/src/App.tsx",
+    "frontend/src/App.css",
+    "docs/api/"
+  ]
+}

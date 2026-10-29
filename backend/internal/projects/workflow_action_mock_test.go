@@ -25,7 +25,7 @@ func TestMarkReadyActionRunsMockedSpecificationGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	finished := filepath.Join(t.TempDir(), "agent-finished")
-	script := "#!/bin/sh\nmkdir -p openspec/changes/task-43/specs/core\nprintf '%s\\n' proposal > openspec/changes/task-43/proposal.md\nprintf '%s\\n' design > openspec/changes/task-43/design.md\nprintf '%s\\n' tasks > openspec/changes/task-43/tasks.md\nprintf '%s\\n' spec > openspec/changes/task-43/specs/core/spec.md\necho complete > '" + finished + "'\nprintf '%s\\n' '{\"type\":\"text\"}'\n"
+	script := "#!/bin/sh\nmkdir -p openspec/changes/task-43/specs/core\nprintf '%s\\n' proposal > openspec/changes/task-43/proposal.md\nprintf '%s\\n' design > openspec/changes/task-43/design.md\nprintf '%s\\n' tasks > openspec/changes/task-43/tasks.md\nprintf '%s\\n' spec > openspec/changes/task-43/specs/core/spec.md\nprintf '%s\\n' '{\"version\":1,\"writablePaths\":[\"main.go\"]}' > openspec/changes/task-43/scope.json\necho complete > '" + finished + "'\nprintf '%s\\n' '{\"type\":\"text\"}'\n"
 	binary := filepath.Join(t.TempDir(), "fake-opencode")
 	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestMarkReadyActionRunsMockedSpecificationGeneration(t *testing.T) {
 	mock.ExpectExec(`UPDATE agent_runs SET process_pid=\$2, process_start_token=\$3`).WithArgs(int64(58), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT COALESCE\(MAX\(round\), 0\) \+ 1 FROM task_specifications WHERE task_id = \$1`).WithArgs(int64(43)).WillReturnRows(sqlmock.NewRows([]string{"round"}).AddRow(1))
-	paths := []byte(`["openspec/changes/task-43/design.md","openspec/changes/task-43/proposal.md","openspec/changes/task-43/specs/core/spec.md","openspec/changes/task-43/tasks.md"]`)
+	paths := []byte(`["openspec/changes/task-43/design.md","openspec/changes/task-43/proposal.md","openspec/changes/task-43/scope.json","openspec/changes/task-43/specs/core/spec.md","openspec/changes/task-43/tasks.md"]`)
 	mock.ExpectExec(`INSERT INTO task_specifications \(task_id, round, status, artifact_paths, summary, run_id\)`).WithArgs(int64(43), 1, "generated", paths, "OpenSpec artifacts generated", int64(58)).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`UPDATE agent_runs SET status=\$2, summary=\$3`).WithArgs(int64(58), "succeeded", "OpenSpec artifacts generated", sqlmock.AnyArg(), sqlmock.AnyArg(), paths).WillReturnResult(sqlmock.NewResult(0, 1))
 	lockedCols := []string{"id", "project_id", "title", "description", "state", "specification_status", "implementation_status", "qa_status", "pr_status", "checks_status", "blocked_from_state", "created_by", "created_at"}
@@ -141,7 +141,7 @@ func TestReturnSpecificationActionRequiresCommentAndUpdatesLatestReview(t *testi
 	mock.ExpectQuery(`SELECT t.id, t.project_id, t.title, t.description, t.state`).WithArgs(int64(71)).WillReturnRows(sqlmock.NewRows(selectedCols).AddRow(71, 8, "Feature", "", "Aguardando aprovação das especificações", "pending", "not_started", "not_started", "not_created", "unknown", "", 7, now, 0, "/tmp/project"))
 	updatedCols := []string{"id", "project_id", "title", "description", "state", "specification_status", "implementation_status", "qa_status", "pr_status", "checks_status", "created_by", "created_at"}
 	mock.ExpectQuery(`UPDATE tasks SET state = \$2, specification_status = \$3`).WithArgs(int64(71), workflow.StateSpecChanges, workflow.StatusChangesRequested, workflow.StatusNotStarted, workflow.StatusNotStarted, workflow.StatusNotCreated, workflow.StatusUnknown, "").WillReturnRows(sqlmock.NewRows(updatedCols).AddRow(71, 8, "Feature", "", "Ajustes nas especificações", "changes_requested", "not_started", "not_started", "not_created", "unknown", 7, now))
-	mock.ExpectExec(`UPDATE task_specifications SET status=\$2`).WithArgs(int64(71), "changes_requested").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE task_specifications SET status=\$2, write_paths=\$3`).WithArgs(int64(71), "changes_requested", []byte("[]")).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO task_events`).WithArgs(int64(71), int64(7), "PO", "approval", string(workflow.ActionReturnSpecification), "Aguardando aprovação das especificações", string(workflow.StateSpecChanges), "Revise a seção de API", "").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO task_events`).WithArgs(int64(71), int64(7), "PO", "comment", string(workflow.ActionReturnSpecification), "Aguardando aprovação das especificações", string(workflow.StateSpecChanges), "Revise a seção de API", "").WillReturnResult(sqlmock.NewResult(2, 1))
 	mock.ExpectCommit()
@@ -315,13 +315,22 @@ func TestApplyTaskActionSpecificationApprovalAndCorrectionGatesWithMocks(t *test
 		token := "approve-spec-missing-artifact"
 		hash := sha256.Sum256([]byte(token))
 		now := time.Now()
+		projectRoot := t.TempDir()
+		scopePath := filepath.Join(projectRoot, "openspec", "changes", "task-82", "scope.json")
+		if err := os.MkdirAll(filepath.Dir(scopePath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(scopePath, []byte(`{"version":1,"writablePaths":["main.go"]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		mock.ExpectQuery(`SELECT u.id, u.username, u.display_name, u.role\s+FROM user_sessions`).WithArgs(hash[:]).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "display_name", "role"}).AddRow(7, "po.user", "PO", "PO"))
 		mock.ExpectBegin()
 		cols := []string{"id", "project_id", "title", "description", "state", "specification_status", "implementation_status", "qa_status", "pr_status", "checks_status", "blocked_from_state", "created_by", "created_at", "pr_number", "workspace_path"}
-		mock.ExpectQuery(`SELECT t.id, t.project_id, t.title, t.description, t.state`).WithArgs(int64(82)).WillReturnRows(sqlmock.NewRows(cols).AddRow(82, 5, "Spec approval", "", string(workflow.StateWaitingSpecApproval), workflow.StatusPending, workflow.StatusNotStarted, workflow.StatusNotStarted, workflow.StatusNotCreated, workflow.StatusUnknown, "", 7, now, 0, "/tmp/project"))
+		mock.ExpectQuery(`SELECT t.id, t.project_id, t.title, t.description, t.state`).WithArgs(int64(82)).WillReturnRows(sqlmock.NewRows(cols).AddRow(82, 5, "Spec approval", "", string(workflow.StateWaitingSpecApproval), workflow.StatusPending, workflow.StatusNotStarted, workflow.StatusNotStarted, workflow.StatusNotCreated, workflow.StatusUnknown, "", 7, now, 0, projectRoot))
+		mock.ExpectQuery(`SELECT artifact_paths FROM task_specifications WHERE task_id=\$1 AND status='generated'`).WithArgs(int64(82)).WillReturnRows(sqlmock.NewRows([]string{"artifact_paths"}).AddRow([]byte(`["openspec/changes/task-82/scope.json"]`)))
 		updatedCols := []string{"id", "project_id", "title", "description", "state", "specification_status", "implementation_status", "qa_status", "pr_status", "checks_status", "created_by", "created_at"}
 		mock.ExpectQuery(`UPDATE tasks SET state = \$2, specification_status = \$3`).WithArgs(int64(82), workflow.StateInDevelopment, workflow.StatusApproved, workflow.StatusRunning, workflow.StatusNotStarted, workflow.StatusNotCreated, workflow.StatusUnknown, "").WillReturnRows(sqlmock.NewRows(updatedCols).AddRow(82, 5, "Spec approval", "", string(workflow.StateInDevelopment), workflow.StatusApproved, workflow.StatusRunning, workflow.StatusNotStarted, workflow.StatusNotCreated, workflow.StatusUnknown, 7, now))
-		mock.ExpectExec(`UPDATE task_specifications SET status=\$2`).WithArgs(int64(82), "approved").WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectExec(`UPDATE task_specifications SET status=\$2, write_paths=\$3`).WithArgs(int64(82), "approved", []byte(`["main.go"]`)).WillReturnResult(sqlmock.NewResult(0, 0))
 		r := httptest.NewRequest("POST", "/api/tasks/82/actions", strings.NewReader(`{"action":"approve_specification"}`))
 		r.SetPathValue("id", "82")
 		r.AddCookie(&http.Cookie{Name: "fabrica_session", Value: token})

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"fabrica/backend/internal/database"
 	"fabrica/backend/internal/opencode"
 	"fabrica/backend/internal/projects"
+	"fabrica/backend/internal/securitygateway"
 	"fabrica/backend/internal/workspace"
 )
 
@@ -23,6 +26,12 @@ type healthResponse struct {
 }
 
 func main() {
+	if handled, err := runGatewayMode(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	workspaceRoot, err := workspace.Root(os.Getenv("FABRICA_WORKSPACE"))
 	if err != nil {
 		log.Fatalf("workspace configuration failed: %v", err)
@@ -87,4 +96,15 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+func runGatewayMode(args []string, input io.Reader, output, errorOutput io.Writer) (bool, error) {
+	if len(args) == 0 || args[0] != "security-gateway" {
+		return false, nil
+	}
+	if err := securitygateway.RunCLI(args[1:], input, output); err != nil {
+		_, _ = fmt.Fprintln(errorOutput, err)
+		return true, err
+	}
+	return true, nil
 }

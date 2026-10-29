@@ -69,10 +69,16 @@ type TaskImplementation = {
   summary: string
   createdAt: string
 }
+type AgentRun = {
+  id: number; taskId: number; phase: 'specification' | 'implementation'; attempt: number
+  status: string; summary: string; stdout: string; stderr: string; resultRefs: string[]
+  projectName?: string; taskTitle?: string
+  startedAt: string; finishedAt?: string
+}
 type QAEnvironment = { projectId: number; taskId: number; status: 'starting' | 'healthy' | 'unhealthy' | 'stopped'; url?: string; port?: number; healthCheckedAt?: string }
 type TaskPullRequest = { number: number; url: string; branch: string; checks?: { name: string; state: string; link: string; workflow: string }[] }
 
-type Page = 'loading' | 'setup' | 'login' | 'projects' | 'project' | 'task' | 'users' | 'error'
+type Page = 'loading' | 'setup' | 'login' | 'projects' | 'project' | 'task' | 'users' | 'observability' | 'error'
 
 const taskColumns = [
   { title: 'Preparação', states: ['Aberta', 'Pronta'] },
@@ -92,6 +98,29 @@ function normalizeSpecifications(items: TaskSpecification[]) {
 
 function normalizeImplementations(items: TaskImplementation[]) {
   return items.map((item) => ({ ...item, changedFiles: item.changedFiles ?? [] }))
+}
+
+function observationActivity(runs: AgentRun[]) {
+  const now = new Date()
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(now)
+    day.setHours(0, 0, 0, 0)
+    day.setDate(day.getDate() - (6 - index))
+    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+    const count = runs.filter((run) => {
+      const started = new Date(run.startedAt)
+      return started.getFullYear() === day.getFullYear() && started.getMonth() === day.getMonth() && started.getDate() === day.getDate()
+    }).length
+    return { key, label: day.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''), count }
+  })
+}
+
+function observationStatusCounts(runs: AgentRun[]) {
+  return ['running', 'succeeded', 'failed', 'cancelled'].map((status) => ({
+    status,
+    label: status === 'running' ? 'Em execução' : status === 'succeeded' ? 'Concluídos' : status === 'failed' ? 'Falharam' : 'Cancelados',
+    count: runs.filter((run) => run.status === status).length,
+  }))
 }
 
 function phaseStatus(value: string) {
@@ -176,6 +205,12 @@ function App() {
   const [specifications, setSpecifications] = useState<TaskSpecification[]>([])
   const [specificationArtifact, setSpecificationArtifact] = useState<SpecificationArtifact | null>(null)
   const [implementations, setImplementations] = useState<TaskImplementation[]>([])
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([])
+  const [selectedAgentRunId, setSelectedAgentRunId] = useState<number | null>(null)
+  const [agentLogsError, setAgentLogsError] = useState('')
+  const [observedRuns, setObservedRuns] = useState<AgentRun[]>([])
+  const [selectedObservedRunId, setSelectedObservedRunId] = useState<number | null>(null)
+  const [observabilityError, setObservabilityError] = useState('')
   const [qaEnvironment, setQAEnvironment] = useState<QAEnvironment | null>(null)
   const [qaLogs, setQALogs] = useState('')
   const [qaFailureMessage, setQAFailureMessage] = useState('')
@@ -195,6 +230,17 @@ function App() {
   const [editingTask, setEditingTask] = useState(false)
   const [actionComment, setActionComment] = useState('')
   const [qaEvidence, setQAEvidence] = useState('')
+
+  const refreshObservedRuns = useCallback(async () => {
+    try {
+      const runs = await api<AgentRun[]>('/api/agent-runs')
+      setObservedRuns(runs)
+      setSelectedObservedRunId((current) => current && runs.some((run) => run.id === current) ? current : runs[0]?.id ?? null)
+      setObservabilityError('')
+    } catch (error) {
+      setObservabilityError(error instanceof Error ? error.message : 'Não foi possível carregar as execuções dos agentes.')
+    }
+  }, [])
 
   const refreshQAEnvironment = useCallback(async (taskID: number) => {
     const environment = await api<QAEnvironment>(`/api/tasks/${taskID}/environment`)
@@ -286,6 +332,7 @@ function App() {
         const safeRounds = normalizeSpecifications(rounds)
         setSpecifications(safeRounds)
         setImplementations(normalizeImplementations(await api<TaskImplementation[]>(`/api/tasks/${task.id}/implementations`)))
+        setAgentRuns(await api<AgentRun[]>(`/api/tasks/${taskID}/agent-runs`))
         const latest = safeRounds.at(-1)
         if (task.state !== 'Especificando' && latest?.artifactPaths.length) {
           const artifact = await api<SpecificationArtifact>(`/api/tasks/${task.id}/specifications/${latest.round}/artifact?path=${encodeURIComponent(latest.artifactPaths[0])}`)
@@ -319,6 +366,16 @@ function App() {
     void refresh()
     return () => { active = false; window.clearInterval(timer) }
   }, [page, selectedTask?.id, selectedTask?.state, qaEnvironment?.status, refreshQAEnvironment])
+
+  useEffect(() => {
+    if (page !== 'observability') return
+    const initialRefresh = window.setTimeout(() => void refreshObservedRuns(), 0)
+    const timer = window.setInterval(() => void refreshObservedRuns(), 2000)
+    return () => {
+      window.clearTimeout(initialRefresh)
+      window.clearInterval(timer)
+    }
+  }, [page, refreshObservedRuns])
 
   async function enterFactory(user: User) {
     setCurrentUser(user)
@@ -363,6 +420,10 @@ function App() {
       setTaskPullRequest(pull.number ? pull : null)
       setPullRequestChecks('')
       setEvents(await api<TaskEvent[]>(`/api/tasks/${task.id}/events`))
+      const runs = await api<AgentRun[]>(`/api/tasks/${task.id}/agent-runs`)
+      setAgentRuns(runs)
+      setSelectedAgentRunId(runs.at(-1)?.id ?? null)
+      setAgentLogsError('')
       setImplementations(normalizeImplementations(await api<TaskImplementation[]>(`/api/tasks/${task.id}/implementations`)))
       const rounds = normalizeSpecifications(await api<TaskSpecification[]>(`/api/tasks/${task.id}/specifications`))
       setSpecifications(rounds)
@@ -760,7 +821,8 @@ function App() {
         </div>
       </header>
       <nav className="app-nav" aria-label="Navegação principal">
-        <button className={page !== 'users' ? 'nav-link nav-link--active' : 'nav-link'} type="button" onClick={() => { setPage('projects'); setMessage('') }}>Projetos</button>
+        <button className={page !== 'users' && page !== 'observability' ? 'nav-link nav-link--active' : 'nav-link'} type="button" onClick={() => { setPage('projects'); setMessage('') }}>Projetos</button>
+        <button className={page === 'observability' ? 'nav-link nav-link--active' : 'nav-link'} type="button" onClick={() => { setPage('observability'); setMessage('') }}>Observabilidade</button>
         {currentUser?.role === 'Admin' && <button className={page === 'users' ? 'nav-link nav-link--active' : 'nav-link'} type="button" onClick={() => void openUserManagement()}>Usuários</button>}
       </nav>
 
@@ -816,6 +878,74 @@ function App() {
             </form>
           </section>}
           <p className="retention-note">Contas desativadas permanecem no histórico e não podem iniciar sessão.</p>
+        </section>
+      ) : page === 'observability' ? (
+        <section className="observability-page" aria-labelledby="observability-title">
+          <div className="page-heading observability-heading">
+            <div><h1 id="observability-title">Observabilidade dos agentes</h1><p className="panel-intro">Execuções do OpenCode em todos os projetos, com estado e logs redigidos.</p></div>
+            <button className="button button--quiet" type="button" onClick={() => void refreshObservedRuns()}>Atualizar agora</button>
+          </div>
+          {observabilityError && <p className="notice notice--error" role="alert">{observabilityError}</p>}
+          {(() => {
+            const activeRuns = observedRuns.filter((run) => run.status === 'running')
+            const failedRuns = observedRuns.filter((run) => run.status === 'failed')
+            const completedRuns = observedRuns.filter((run) => run.status === 'succeeded')
+            const daily = observationActivity(observedRuns)
+            const statusCounts = observationStatusCounts(observedRuns)
+            const chartMax = Math.max(1, ...daily.map((item) => item.count))
+            const statusMax = Math.max(1, ...statusCounts.map((item) => item.count))
+            const selectedRun = observedRuns.find((run) => run.id === selectedObservedRunId) ?? observedRuns[0]
+            return <>
+              <section className="observation-metrics" aria-label="Resumo de execuções">
+                <div><span>Em execução</span><strong>{activeRuns.length}</strong></div>
+                <div><span>Concluídas</span><strong>{completedRuns.length}</strong></div>
+                <div><span>Com falha</span><strong>{failedRuns.length}</strong></div>
+                <div><span>Janela</span><strong>{observedRuns.length}</strong><small>mais recentes</small></div>
+              </section>
+              <div className="observation-charts">
+                <section className="observation-chart" aria-labelledby="activity-chart-title">
+                  <div className="section-heading"><h2 id="activity-chart-title">Atividade nos últimos 7 dias</h2><span>execuções iniciadas por dia</span></div>
+                  {observedRuns.length ? <svg className="observation-bars" viewBox="0 0 420 176" role="img" aria-label="Gráfico de execuções iniciadas por dia nos últimos sete dias">
+                    {[0, 1, 2].map((line) => <line key={line} x1="30" x2="410" y1={124 - line * 46} y2={124 - line * 46} />)}
+                    {daily.map((item, index) => {
+                      const height = item.count ? Math.max(5, item.count / chartMax * 92) : 0
+                      const x = 43 + index * 53
+                      return <g key={item.key}><rect x={x} y={124 - height} width="25" height={height} rx="2" /><text className="chart-count" x={x + 12} y={Math.max(18, 116 - height)} textAnchor="middle">{item.count}</text><text className="chart-label" x={x + 12} y="149" textAnchor="middle">{item.label}</text></g>
+                    })}
+                  </svg> : <p className="empty-state">Ainda não há execuções para mostrar.</p>}
+                </section>
+                <section className="observation-chart" aria-labelledby="status-chart-title">
+                  <div className="section-heading"><h2 id="status-chart-title">Execuções por estado</h2><span>na janela carregada</span></div>
+                  <div className="observation-status-chart" role="img" aria-label="Distribuição das execuções por estado">
+                    {statusCounts.map((item) => <div className="observation-status-row" key={item.status}>
+                      <span>{item.label}</span><div><i className={`observation-status-fill observation-status-fill--${item.status}`} style={{ width: `${item.count / statusMax * 100}%` }} /></div><strong>{item.count}</strong>
+                    </div>)}
+                  </div>
+                </section>
+              </div>
+              <div className="observation-workspace">
+                <section className="observation-run-list" aria-labelledby="observation-runs-title">
+                  <div className="section-heading"><h2 id="observation-runs-title">Execuções recentes</h2><span>{observedRuns.length} registros</span></div>
+                  {observedRuns.length ? <ol>{observedRuns.map((run) => <li key={run.id}>
+                    <button className={selectedRun?.id === run.id ? 'observation-run-row observation-run-row--selected' : 'observation-run-row'} type="button" aria-pressed={selectedRun?.id === run.id} onClick={() => setSelectedObservedRunId(run.id)}>
+                      <span className={`run-status run-status--${run.status}`}>{phaseStatus(run.status)}</span><strong>{run.projectName || 'Projeto'} · FAB-{run.taskId}</strong>
+                      <span>{run.taskTitle || 'Tarefa'} · {run.phase === 'specification' ? 'Especificação' : 'Implementação'} · tentativa {run.attempt}</span>
+                      <time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('pt-BR')}</time>
+                    </button>
+                  </li>)}</ol> : <p className="empty-state">Nenhum agente foi executado ainda.</p>}
+                  {observedRuns.length === 500 && <p className="observation-limit-note">Mostrando as 500 execuções mais recentes.</p>}
+                </section>
+                <section className="observation-log-panel" aria-labelledby="observation-log-title">
+                  <div className="section-heading"><h2 id="observation-log-title">Logs da execução</h2>{selectedRun && <span>FAB-{selectedRun.taskId} · #{selectedRun.id}</span>}</div>
+                  {selectedRun ? <>
+                    <p className="observation-run-summary">{selectedRun.summary || (selectedRun.status === 'running' ? 'O agente está trabalhando nesta tarefa.' : 'Sem resumo registrado.')}</p>
+                    <div className="observation-log-block"><h3>Saída do agente</h3><pre>{selectedRun.stdout || (selectedRun.status === 'running' ? 'Os logs completos ficam disponíveis após o término da execução.' : 'Sem saída registrada.')}</pre></div>
+                    <div className="observation-log-block"><h3>Erros e diagnóstico</h3><pre>{selectedRun.stderr || 'Sem erros registrados.'}</pre></div>
+                  </> : <p className="empty-state">Selecione uma execução para consultar os logs.</p>}
+                </section>
+              </div>
+            </>
+          })()}
         </section>
       ) : page === 'projects' ? (
         <section className="projects-page" aria-labelledby="projects-title">
@@ -953,6 +1083,30 @@ function App() {
                 </label>
                 {specificationArtifact && <><p className="artifact-path">{specificationArtifact.path}</p><pre className="artifact-preview">{specificationArtifact.content}</pre></>}
               </section>}
+              <section className="agent-observability-panel" aria-labelledby="agent-observability-title">
+                <div className="section-heading"><div><h2 id="agent-observability-title">Observabilidade do agente</h2><p>Execuções OpenCode e saída redigida</p></div><button className="text-button text-button--neutral" type="button" onClick={() => {
+                  void api<AgentRun[]>(`/api/tasks/${selectedTask.id}/agent-runs`).then((runs) => { setAgentRuns(runs); setAgentLogsError('') }).catch((error) => setAgentLogsError(error instanceof Error ? error.message : 'Não foi possível atualizar as execuções.'))
+                }}>Atualizar</button></div>
+                {agentLogsError && <p className="agent-logs-error" role="alert">{agentLogsError}</p>}
+                {agentRuns.length ? <>
+                  <label className="agent-run-picker">Execução
+                    <select value={selectedAgentRunId ?? agentRuns.at(-1)?.id ?? ''} onChange={(event) => setSelectedAgentRunId(Number(event.target.value))}>
+                      {agentRuns.map((run) => <option key={run.id} value={run.id}>{run.phase === 'specification' ? 'Especificação' : 'Implementação'} · tentativa {run.attempt} · {phaseStatus(run.status)} · {new Date(run.startedAt).toLocaleString('pt-BR')}</option>)}
+                    </select>
+                  </label>
+                  {(() => {
+                    const run = agentRuns.find((item) => item.id === selectedAgentRunId) ?? agentRuns.at(-1)
+                    if (!run) return null
+                    return <><p className="agent-run-summary"><span className={`run-status run-status--${run.status}`}>{phaseStatus(run.status)}</span>{run.summary || 'Execução em andamento.'}</p>
+                      <div className="agent-log-grid">
+                        <section><h3>Saída do agente</h3><pre className="agent-log-output">{run.stdout || (run.status === 'running' ? 'A saída será disponibilizada quando a execução terminar.' : 'Sem saída registrada.')}</pre></section>
+                        <section><h3>Erros e diagnóstico</h3><pre className="agent-log-output agent-log-output--error">{run.stderr || 'Sem erros registrados.'}</pre></section>
+                      </div>
+                      {(run.resultRefs ?? []).length > 0 && <p className="agent-run-refs">Referências: {(run.resultRefs ?? []).join(' · ')}</p>}
+                    </>
+                  })()}
+                </> : <p className="empty-state">Ainda não há execuções de agente para esta tarefa.</p>}
+              </section>
               {implementations.length > 0 && <section className="implementation-panel" aria-labelledby="implementation-title">
                 <div className="section-heading"><h2 id="implementation-title">Execuções de implementação</h2><span>{implementations.length} tentativas</span></div>
                 <ol className="implementation-list">{implementations.map((run) => <li key={run.id}>
