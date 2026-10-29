@@ -8,13 +8,13 @@ The repository has two application modules: `backend/` contains the Go API, doma
 
 - `docker compose up -d --wait` starts the local PostgreSQL service.
 - `./scripts/run-api.sh` loads `.env`, applies migrations, and starts the API on `127.0.0.1:8080`.
-- `cd frontend && npm ci && npm run dev` installs frontend dependencies and starts Vite on port `5173`.
+- `cd frontend && pnpm install --frozen-lockfile && pnpm run dev` installs frontend dependencies and starts Vite on port `5173`.
 - `cd backend && go test ./...` runs all Go tests.
-- `cd frontend && npm run lint && npm run build` checks ESLint rules, TypeScript, and the production Vite build.
+- `cd frontend && pnpm run lint && pnpm run build` checks ESLint rules, TypeScript, and the production Vite build.
 
 ## Coding Style & Naming Conventions
 
-Format Go code with `gofmt`; use Go's standard exported `PascalCase` and unexported `camelCase` names. Frontend code uses TypeScript/TSX, two-space indentation, `PascalCase` for React components and types, and `camelCase` for functions and values. Keep styles in the existing CSS files and follow the project's ESLint configuration. Avoid adding dependencies when the existing Go or npm packages already cover the need.
+Format Go code with `gofmt`; use Go's standard exported `PascalCase` and unexported `camelCase` names. Frontend code uses TypeScript/TSX, two-space indentation, `PascalCase` for React components and types, and `camelCase` for functions and values. Keep styles in the existing CSS files and follow the project's ESLint configuration. Avoid adding dependencies when the existing Go or JavaScript packages already cover the need.
 
 ## Testing Guidelines
 

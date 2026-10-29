@@ -1,5 +1,10 @@
 # Instruções do repositório
 
+## Gerenciador de pacotes JavaScript
+
+- O repositório MUST usar pnpm para instalar, adicionar, remover e executar dependências JavaScript. Não use npm ou Yarn para essas tarefas.
+- Mantenha `pnpm-lock.yaml` atualizado e use `pnpm install --frozen-lockfile` na CI.
+
 ## OpenSpec
 
 - Antes de iniciar qualquer tarefa, leia os arquivos de `openspec/` pertinentes ao escopo. Consulte sempre as especificações em `openspec/specs/` e os artefatos de mudanças ativas em `openspec/changes/`; leia o histórico em `openspec/changes/archive/` quando ele for relevante.
