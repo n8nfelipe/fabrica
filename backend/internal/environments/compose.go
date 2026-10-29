@@ -41,17 +41,14 @@ type ComposeManager struct {
 }
 
 func (m ComposeManager) Start(ctx context.Context, projectID int64, workspace string) (Environment, error) {
-	args, descriptor, composePath, projectName, err := m.prepare(ctx, projectID, workspace, 0)
-	if err != nil {
-		return Environment{}, err
-	}
-	if _, err := m.run(ctx, workspace, append(args, "up", "--detach")...); err != nil {
-		return Environment{}, err
-	}
-	return m.inspectPrepared(ctx, workspace, descriptor, composePath, projectName, args)
+	return m.start(ctx, projectID, workspace, 0)
 }
 
 func (m ComposeManager) StartWithPort(ctx context.Context, projectID int64, workspace string, hostPort int) (Environment, error) {
+	return m.start(ctx, projectID, workspace, hostPort)
+}
+
+func (m ComposeManager) start(ctx context.Context, projectID int64, workspace string, hostPort int) (Environment, error) {
 	args, descriptor, composePath, projectName, err := m.prepare(ctx, projectID, workspace, hostPort)
 	if err != nil {
 		return Environment{}, err
@@ -167,6 +164,14 @@ func (m ComposeManager) logsByProjectLabel(ctx context.Context, projectID int64,
 var containerIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
 
 func (m ComposeManager) runDocker(parent context.Context, directory string, args ...string) (string, error) {
+	return m.runCommand(parent, directory, "docker "+args[0], "Docker output exceeded the capture limit", args...)
+}
+
+func (m ComposeManager) run(parent context.Context, directory string, args ...string) (string, error) {
+	return m.runCommand(parent, directory, "docker compose "+args[len(args)-1], "docker Compose output exceeded the capture limit", args...)
+}
+
+func (m ComposeManager) runCommand(parent context.Context, directory, failurePrefix, truncatedMessage string, args ...string) (string, error) {
 	timeout := m.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
@@ -193,10 +198,10 @@ func (m ComposeManager) runDocker(parent context.Context, directory string, args
 		if len(message) > 1000 {
 			message = message[:1000]
 		}
-		return stdout.String(), fmt.Errorf("docker %s failed: %s", args[0], message)
+		return stdout.String(), fmt.Errorf("%s failed: %s", failurePrefix, message)
 	}
 	if stdout.truncated || stderr.truncated {
-		return stdout.String(), errors.New("Docker output exceeded the capture limit")
+		return stdout.String(), errors.New(truncatedMessage)
 	}
 	return stdout.String(), nil
 }
@@ -331,41 +336,6 @@ func (m ComposeManager) inspectPrepared(ctx context.Context, workspace string, d
 		return Environment{}, err
 	}
 	return Environment{ProjectName: projectName, ComposeFile: composePath, Containers: containers}, nil
-}
-
-func (m ComposeManager) run(parent context.Context, directory string, args ...string) (string, error) {
-	timeout := m.Timeout
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-	binary := m.DockerPath
-	if binary == "" {
-		binary = "docker"
-	}
-	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Dir = directory
-	var stdout, stderr limitedOutput
-	stdout.limit, stderr.limit = composeOutputLimit, 64<<10
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return stdout.String(), ctx.Err()
-		}
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		if len(message) > 1000 {
-			message = message[:1000]
-		}
-		return stdout.String(), fmt.Errorf("docker compose %s failed: %s", args[len(args)-1], message)
-	}
-	if stdout.truncated || stderr.truncated {
-		return stdout.String(), errors.New("docker Compose output exceeded the capture limit")
-	}
-	return stdout.String(), nil
 }
 
 type limitedOutput struct {
